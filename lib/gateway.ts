@@ -638,6 +638,9 @@ function buildOutgoingBody(api: ApiRecord, requestBody: string, requestHeaders: 
     requestHeaders["content-type"] = "application/x-www-form-urlencoded";
     return params;
   }
+  for (const name of Object.keys(requestHeaders)) {
+    if (name.toLowerCase() === "content-type") delete requestHeaders[name];
+  }
   requestHeaders["content-type"] = api.requestContentType || "application/json";
   return requestBody;
 }
