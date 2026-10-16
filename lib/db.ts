@@ -75,7 +75,7 @@ const CREATE_BARRICADES = `
     response_template MEDIUMTEXT NULL,
     active TINYINT(1) NOT NULL DEFAULT 1,
     fallback_id INT UNSIGNED NULL,
-    fallback_on VARCHAR(120) NOT NULL DEFAULT 'timeout,conexao,http_5xx',
+    fallback_on VARCHAR(120) NOT NULL DEFAULT 'timeout,conexao,http_5xx,cota',
     idempotent TINYINT(1) NOT NULL DEFAULT 0,
     config_version INT UNSIGNED NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -242,6 +242,15 @@ export function ensureSchema() {
           "INSERT IGNORE INTO user_pages (user_id, page_key) SELECT user_id, 'painel' FROM user_pages WHERE page_key = 'barricadas'",
         );
         await db.query("INSERT INTO schema_flags (flag) VALUES ('grant_painel_nav_v1')");
+      }
+      const [cotaRows] = await db.query<RowDataPacket[]>(
+        "SELECT flag FROM schema_flags WHERE flag = 'fallback_cota_v1' LIMIT 1",
+      );
+      if (!cotaRows[0]) {
+        await db.query(
+          "UPDATE barricades SET fallback_on = CONCAT(fallback_on, ',cota') WHERE fallback_on <> '' AND fallback_on NOT LIKE '%cota%'",
+        );
+        await db.query("INSERT INTO schema_flags (flag) VALUES ('fallback_cota_v1')");
       }
     })().catch((error: unknown) => {
       schemaReady = null;

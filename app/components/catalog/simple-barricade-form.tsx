@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState, type ChangeEvent } from "react";
+import { startTransition, useActionState, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { renewToken, saveSimpleBarricade } from "@/app/actions/catalog";
 import { fieldClass } from "@/app/components/catalog/fields";
 import { alertClass, submitClass, successClass } from "@/app/components/text-field";
@@ -46,12 +46,23 @@ export function SimpleBarricadeForm({
   const [saveState, saveAction, saving] = useActionState(saveSimpleBarricade, initialState);
   const [pingState, setPingState] = useState<CatalogState>({});
   const [pinging, setPinging] = useState(false);
+  const signature = draftSignature(draft);
+  const [seen, setSeen] = useState(signature);
   const [bodyMode, setBodyMode] = useState(draft.bodyMode);
   const [headers, setHeaders] = useState<HeaderDraft[]>(draft.headers.length > 0 ? draft.headers : [{ name: "", value: "", keep: false }]);
   const [fields, setFields] = useState<OpenField[]>(draft.fields.length > 0 ? draft.fields : [{ name: "", value: "", open: false }]);
   const [slug, setSlug] = useState(draft.slug);
   const [slugTouched, setSlugTouched] = useState(Boolean(draft.slug));
   const [chosen, setChosen] = useState<Record<string, Chosen>>(() => chosenFrom(draft.responseTemplate));
+  if (seen !== signature) {
+    setSeen(signature);
+    setBodyMode(draft.bodyMode);
+    setHeaders(draft.headers.length > 0 ? draft.headers : [{ name: "", value: "", keep: false }]);
+    setFields(draft.fields.length > 0 ? draft.fields : [{ name: "", value: "", open: false }]);
+    setSlug(draft.slug);
+    setSlugTouched(Boolean(draft.slug));
+    setChosen(chosenFrom(draft.responseTemplate));
+  }
   const [leaves, setLeaves] = useState<Leaf[]>([]);
   const [appliedPing, setAppliedPing] = useState("");
 
@@ -69,8 +80,16 @@ export function SimpleBarricadeForm({
   const rows = leaves.length > 0 ? leaves : selectionFromTemplate(draft.responseTemplate).map((item) => ({ path: item.path, sample: "" }));
   const publicPath = `/api/barricada/${slug || "endereco"}`;
 
+  function onSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    startTransition(() => {
+      saveAction(data);
+    });
+  }
+
   return (
-    <form action={saveAction} className="flex flex-col gap-5">
+    <form onSubmit={onSave} className="flex flex-col gap-5">
       {draft.barricadeId ? <input type="hidden" name="id" value={draft.barricadeId} /> : null}
       {draft.apiId ? <input type="hidden" name="api_id" value={draft.apiId} /> : null}
       <input type="hidden" name="response_template" value={template} />
@@ -87,6 +106,7 @@ export function SimpleBarricadeForm({
         </Link>
       ) : null}
 
+      <div key={seen} className="flex flex-col gap-5">
       <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
         <h2 className="text-sm font-medium">API</h2>
         <label className="text-sm text-foreground">
@@ -253,7 +273,7 @@ export function SimpleBarricadeForm({
             ))}
           </select>
         </label>
-        <p className="text-xs text-muted">A reserva entra em timeout, falha de conexão ou erro 5xx. Quem chama continua usando GET {publicPath} com Authorization: Bearer.</p>
+        <p className="text-xs text-muted">A reserva entra em timeout, falha de conexão, erro 5xx ou cota estourada (HTTP 429). Quem chama continua usando GET {publicPath} com Authorization: Bearer.</p>
         <label className="flex items-center gap-2 text-sm text-foreground">
           <input type="checkbox" name="active" value="1" defaultChecked={draft.active} />
           Barricada ativa
@@ -262,6 +282,7 @@ export function SimpleBarricadeForm({
           {saving ? "Salvando..." : "Salvar"}
         </button>
       </section>
+      </div>
     </form>
   );
 }
@@ -328,6 +349,28 @@ function LogoField({ barricadeId, logoUpdatedAt }: { barricadeId?: number; logoU
       </div>
     </div>
   );
+}
+
+function draftSignature(draft: SimpleDraft) {
+  return JSON.stringify({
+    barricadeId: draft.barricadeId ?? null,
+    apiId: draft.apiId ?? null,
+    name: draft.name,
+    apiUrl: draft.apiUrl,
+    apiMethod: draft.apiMethod,
+    bodyMode: draft.bodyMode,
+    headers: draft.headers,
+    fields: draft.fields,
+    jsonBody: draft.jsonBody,
+    slug: draft.slug,
+    origins: draft.origins,
+    dailyLimit: draft.dailyLimit,
+    responseTemplate: draft.responseTemplate,
+    fallbackId: draft.fallbackId,
+    active: draft.active,
+    tokenPrefix: draft.tokenPrefix ?? "",
+    logoUpdatedAt: draft.logoUpdatedAt instanceof Date ? draft.logoUpdatedAt.toISOString() : draft.logoUpdatedAt ?? "",
+  });
 }
 
 function chosenFrom(template: string) {

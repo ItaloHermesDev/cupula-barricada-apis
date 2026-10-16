@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { toggleRoutine } from "@/app/actions/catalog";
+import { BarricadePageLinks } from "@/app/components/catalog/barricade-links";
 import { BarricadeMark } from "@/app/components/catalog/barricade-mark";
 import { CallExample, HealthClock } from "@/app/components/catalog/call-example";
 import { RenewToken } from "@/app/components/catalog/simple-barricade-form";
@@ -12,7 +12,7 @@ import { getApi } from "@/lib/apis";
 import { getBarricade, revealToken } from "@/lib/barricades";
 import { dayKey, formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
-import { fieldsFromTemplate } from "@/lib/draft";
+import { instructionFields } from "@/lib/draft";
 import { refreshDueHealth } from "@/lib/health";
 import { searchLogs } from "@/lib/stats";
 
@@ -49,7 +49,7 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
     origin,
     current.slug,
     current.method,
-    fieldsFromTemplate(api.bodyTemplate).filter((field) => field.open),
+    instructionFields(api.bodyTemplate),
     current.responseTemplate,
     current.origins,
   );
@@ -59,24 +59,17 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
   return (
     <div className="flex flex-col gap-5">
       <HealthClock minutes={current.healthIntervalMinutes} enabled={current.healthEnabled} />
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <BarricadeMark id={current.id} updatedAt={current.logoUpdatedAt} size="md" />
-          <div>
+      <div className="flex justify-end">
+        <BarricadePageLinks id={current.id} />
+      </div>
+      <div className="flex items-center gap-3">
+        <BarricadeMark id={current.id} updatedAt={current.logoUpdatedAt} size="md" />
+        <div>
           <p className={`text-sm ${status.className}`}>{status.label}</p>
           <p className="mt-1 text-sm text-muted">
             Hoje: {current.usedToday} {current.usedToday === 1 ? "chamada real" : "chamadas reais"}
             {remaining !== null ? ` · ${remaining} restantes` : ""}. Verificações: {current.internalToday}. Última chamada real: {formatWhen(current.lastUsedAt)}.
           </p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/barricadas" className="rounded-[12px] border border-line px-3 py-1.5 text-sm text-foreground hover:border-accent/50">
-            Voltar
-          </Link>
-          <Link href={`/barricadas/${current.id}/editar`} className="rounded-[12px] border border-line px-3 py-1.5 text-sm text-foreground hover:border-accent/50">
-            Editar
-          </Link>
         </div>
       </div>
 
@@ -178,7 +171,7 @@ function statusOfLog(row: { outcome: string; provider_status: number | null; con
   return `${row.outcome} · ${row.provider_status ?? "—"}/${row.consumer_status}`;
 }
 
-function buildExample(origin: string, slug: string, method: string, fields: { name: string; value: string }[], template: string, allowedOrigins: string[]) {
+function buildExample(origin: string, slug: string, method: string, fields: { name: string; value: string; jsonName: string }[], template: string, allowedOrigins: string[]) {
   const query = fields.map((field) => `${field.name}={${field.name}}`).join("&");
   const url = `${origin}/api/barricada/${slug}${query ? `?${query}` : ""}`;
   const origins = allowedOrigins.filter((item) => item.startsWith("http://") || item.startsWith("https://"));

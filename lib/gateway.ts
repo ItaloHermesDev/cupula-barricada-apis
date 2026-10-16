@@ -24,6 +24,7 @@ const MESSAGES: Record<string, string> = {
   destino_bloqueado: "O destino configurado não pode ser chamado.",
   indisponivel: "O serviço externo não respondeu.",
   tempo_esgotado: "O serviço externo excedeu o tempo limite.",
+  cota: "A cota do provedor foi atingida.",
   provedor: "A chamada foi recusada pelo serviço externo.",
 };
 
@@ -240,7 +241,7 @@ async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: s
     const responseHeaders = Object.fromEntries(response.headers.entries());
     const contentType = response.headers.get("content-type") ?? "";
     const body = contentType.includes("json") ? safeJson(text) : text;
-    const failure = response.status >= 500 ? "http_5xx" : response.status >= 400 ? "http_4xx" : undefined;
+    const failure = response.status === 429 ? "cota" : response.status >= 500 ? "http_5xx" : response.status >= 400 ? "http_4xx" : undefined;
     return resultShell(url, api.method, requestHeaders, requestBody, started, !failure, response.status, responseHeaders, text, failure, body);
   } catch (error) {
     const failure = error instanceof DestinationError ? "destino_bloqueado" : isTimeout(error) ? "tempo_esgotado" : error instanceof Error && error.message === "grande" ? "resposta_grande" : "conexao";
@@ -413,6 +414,7 @@ function canFallback(barricade: BarricadeRecord, failure?: string) {
   if (failure === "tempo_esgotado") return barricade.fallbackOn.includes("timeout");
   if (failure === "conexao") return barricade.fallbackOn.includes("conexao");
   if (failure === "http_5xx") return barricade.fallbackOn.includes("http_5xx");
+  if (failure === "cota") return barricade.fallbackOn.includes("cota");
   return false;
 }
 
@@ -521,6 +523,7 @@ function consumerKey(request: Request, prefix: string) {
 function consumerError(failure?: string) {
   if (failure === "tempo_esgotado") return { status: 504, code: "tempo_esgotado" };
   if (failure === "destino_bloqueado") return { status: 422, code: "destino_bloqueado" };
+  if (failure === "cota") return { status: 429, code: "cota" };
   if (failure === "http_4xx") return { status: 424, code: "provedor" };
   return { status: 502, code: "indisponivel" };
 }

@@ -14,7 +14,7 @@ export function CallExample({
   method: string;
   url: string;
   env: string;
-  fields: { name: string; value: string }[];
+  fields: { name: string; value: string; jsonName?: string }[];
   origins: string[];
   response: string;
 }) {
@@ -93,7 +93,7 @@ function buildPrompt({
   method: string;
   url: string;
   env: string;
-  fields: { name: string; value: string }[];
+  fields: { name: string; value: string; jsonName?: string }[];
   origin: string;
   response: string;
 }) {
@@ -113,13 +113,15 @@ function buildPrompt({
   if (fields.length === 0) {
     lines.push("Esta URL não recebe parâmetros.");
   } else {
-    lines.push("Parâmetros na URL:");
+    lines.push(
+      "Parâmetros na URL:",
+      "O nome do parâmetro na URL da barricada é o nome do campo no JSON enviado à API. O valor informado na URL é o valor enviado nesse campo.",
+    );
     for (const field of fields) {
-      lines.push(
-        field.value
-          ? `- ${field.name}: quem chama informa o valor no lugar de {${field.name}}. Se o parâmetro não for enviado, a barricada usa o padrão já configurado.`
-          : `- ${field.name}: quem chama informa o valor no lugar de {${field.name}}.`,
-      );
+      const jsonName = field.jsonName && field.jsonName !== field.name ? field.jsonName : field.name;
+      const target = `A barricada envia esse valor no campo ${jsonName} do JSON da API.`;
+      const fallback = field.value ? ` Se o parâmetro não for enviado, a barricada usa ${field.value}.` : "";
+      lines.push(`- ${field.name}: na URL, use ${field.name}={${field.name}}. ${target}${fallback}`);
     }
   }
   lines.push("", "A resposta tem esta forma:", response);

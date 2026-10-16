@@ -119,7 +119,7 @@ export function BarricadeForm({
           </label>
           <div className="text-sm text-foreground">
             Acionar fallback em
-            {["timeout", "conexao", "http_5xx"].map((item) => (
+            {["timeout", "conexao", "http_5xx", "cota"].map((item) => (
               <label key={item} className="mt-2 flex items-center gap-2 text-muted">
                 <input type="checkbox" name="fallback_on" value={item} defaultChecked={barricade ? barricade.fallbackOn.includes(item) : true} />
                 {item}

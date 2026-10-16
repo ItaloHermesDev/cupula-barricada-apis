@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { removeBarricade } from "@/app/actions/catalog";
+import { BarricadePageLinks } from "@/app/components/catalog/barricade-links";
 import { DeleteButton } from "@/app/components/catalog/fields";
 import { SimpleBarricadeForm } from "@/app/components/catalog/simple-barricade-form";
 import { PageFallback } from "@/app/components/dashboard-shell";
@@ -43,9 +43,8 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex gap-4 text-sm">
-        <Link href="/barricadas" className="text-accent">Voltar</Link>
-        <Link href={`/barricadas/${current.id}`} className="text-muted hover:text-foreground">Ver</Link>
+      <div className="flex justify-end">
+        <BarricadePageLinks id={current.id} />
       </div>
       <SimpleBarricadeForm
         alternatives={barricades.map((item) => ({ id: item.id, name: item.name }))}

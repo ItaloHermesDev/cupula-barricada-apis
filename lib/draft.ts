@@ -29,6 +29,36 @@ export function bodyModeOf(contentType: string, template: string): BodyMode {
   return "json";
 }
 
+export type InstructionField = {
+  name: string;
+  jsonName: string;
+  value: string;
+};
+
+const QUERY_FIELD = /^\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)\s*(?:\|\s*([^}]*))?\s*\}\}$/;
+
+export function instructionFields(template: string): InstructionField[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(template);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+  const entries = Object.entries(parsed);
+  const open = entries.flatMap(([jsonName, raw]): InstructionField[] => {
+    if (typeof raw !== "string") return [];
+    const match = raw.match(QUERY_FIELD);
+    if (!match) return [];
+    return [{ name: match[1], jsonName, value: match[2] ?? "" }];
+  });
+  if (open.length > 0) return open;
+  return entries.flatMap(([jsonName, raw]): InstructionField[] => {
+    if (typeof raw !== "string" || raw.includes("{{")) return [];
+    return [{ name: jsonName, jsonName, value: raw }];
+  });
+}
+
 export function fieldsFromTemplate(template: string): OpenField[] {
   try {
     const parsed = JSON.parse(template) as unknown;

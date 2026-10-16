@@ -150,6 +150,7 @@ export async function saveSimpleBarricade(_state: CatalogState, formData: FormDa
       await applyLogo(barricadeId, logo);
       revalidatePath("/barricadas");
       revalidatePath(`/barricadas/${barricadeId}`);
+      revalidatePath(`/barricadas/${barricadeId}/editar`);
       return { success: "Barricada atualizada." };
     }
     try {
@@ -261,7 +262,7 @@ async function readDraft(formData: FormData) {
       responseTemplate: String(formData.get("response_template") ?? ""),
       active: formData.get("active") === "1",
       fallbackId: numberOrNull(formData.get("fallback_id")),
-      fallbackOn: ["timeout", "conexao", "http_5xx"],
+      fallbackOn: ["timeout", "conexao", "http_5xx", "cota"],
       idempotent: true,
     },
   };

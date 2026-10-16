@@ -104,7 +104,7 @@ interface BarricadeRow extends RowDataPacket {
 
 export class BarricadeValidationError extends Error {}
 
-const FALLBACK_KEYS = ["timeout", "conexao", "http_5xx"] as const;
+const FALLBACK_KEYS = ["timeout", "conexao", "http_5xx", "cota"] as const;
 
 export async function listBarricades(day: string) {
   const rows = await query<BarricadeRow[]>(`${SELECT_BARRICADE}`, [day]);

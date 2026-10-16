@@ -102,6 +102,7 @@ function detail(status: number | null, failure: string) {
     tempo_esgotado: "Tempo esgotado",
     conexao: "Sem conexão",
     http_5xx: "Erro no provedor",
+    cota: "Cota do provedor",
     http_4xx: "A API recusou",
     destino_bloqueado: "Destino bloqueado",
     redirecionamento: "A API redirecionou",

@@ -20,11 +20,27 @@ export function renderBody(template: string, consumer: ConsumerContext) {
   const trimmed = template.trim();
   if (!trimmed) return undefined;
   try {
-    return JSON.stringify(applyTemplate(JSON.parse(trimmed) as unknown, {}, consumer));
+    return JSON.stringify(applyTemplate(overlayPlainFields(JSON.parse(trimmed) as unknown, consumer), {}, consumer));
   } catch {
     const rendered = renderString(trimmed, {}, consumer);
     return typeof rendered === "string" ? rendered : JSON.stringify(rendered);
   }
+}
+
+function overlayPlainFields(parsed: unknown, consumer: ConsumerContext) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return parsed;
+  const record = parsed as Record<string, unknown>;
+  const hasOpenField = Object.values(record).some(
+    (value) => typeof value === "string" && /^\{\{\s*consumer\.query\./.test(value),
+  );
+  if (hasOpenField) return parsed;
+  const next: Record<string, unknown> = { ...record };
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value !== "string" || value.includes("{{")) continue;
+    const incoming = consumer.query[key];
+    if (incoming) next[key] = incoming;
+  }
+  return next;
 }
 
 function renderString(template: string, upstream: unknown, consumer: ConsumerContext): unknown {
