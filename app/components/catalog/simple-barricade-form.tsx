@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useMemo, useState, type ChangeEvent } from "react";
-import { pingSimpleBarricade, renewToken, saveSimpleBarricade } from "@/app/actions/catalog";
+import { renewToken, saveSimpleBarricade } from "@/app/actions/catalog";
 import { fieldClass } from "@/app/components/catalog/fields";
 import { alertClass, submitClass, successClass } from "@/app/components/text-field";
 import { HTTP_METHODS, type CatalogState, type HttpMethod } from "@/lib/catalog";
@@ -44,7 +44,8 @@ export function SimpleBarricadeForm({
   endpoint: string;
 }) {
   const [saveState, saveAction, saving] = useActionState(saveSimpleBarricade, initialState);
-  const [pingState, pingAction, pinging] = useActionState(pingSimpleBarricade, initialState);
+  const [pingState, setPingState] = useState<CatalogState>({});
+  const [pinging, setPinging] = useState(false);
   const [bodyMode, setBodyMode] = useState(draft.bodyMode);
   const [headers, setHeaders] = useState<HeaderDraft[]>(draft.headers.length > 0 ? draft.headers : [{ name: "", value: "", keep: false }]);
   const [fields, setFields] = useState<OpenField[]>(draft.fields.length > 0 ? draft.fields : [{ name: "", value: "", open: false }]);
@@ -177,9 +178,19 @@ export function SimpleBarricadeForm({
             disabled={pinging}
             className="rounded-[12px] border border-accent/50 px-4 py-2 text-sm text-accent disabled:opacity-60"
             onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
               const form = event.currentTarget.form;
-              if (!form) return;
-              pingAction(new FormData(form));
+              if (!form || pinging) return;
+              const body = new FormData(form);
+              setPinging(true);
+              void fetch("/api/ping", { method: "POST", body })
+                .then(async (response) => {
+                  const data = (await response.json()) as CatalogState;
+                  setPingState(data.preview || data.error || data.success ? data : { error: "Não foi possível chamar a API." });
+                })
+                .catch(() => setPingState({ error: "Não foi possível chamar a API." }))
+                .finally(() => setPinging(false));
             }}
           >
             {pinging ? "Chamando..." : "Ping"}
