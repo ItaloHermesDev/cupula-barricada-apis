@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { ApiCompareCharts } from "@/app/components/catalog/api-compare";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { dayKey, formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
@@ -132,6 +133,8 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           </ul>
         </article>
       </section>
+
+      <ApiCompareCharts apis={report.apis} period={period} />
 
       <article className="overflow-hidden rounded-[18px] border border-line bg-card/90">
         <div className="flex items-center justify-between gap-3 px-5 py-4">

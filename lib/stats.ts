@@ -91,6 +91,14 @@ export type DaySpend = {
   checks: number;
 };
 
+export type ApiCompare = {
+  id: number;
+  name: string;
+  real: number;
+  checks: number;
+  series: DaySpend[];
+};
+
 export type BarricadeSpend = {
   id: number;
   name: string;
@@ -114,7 +122,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
   const range = resolveRange(input?.from, input?.to, today);
   const barricadeId = input?.barricadeId && input.barricadeId > 0 ? input.barricadeId : 0;
   const span: (string | number)[] = [range.from, range.to, barricadeId, barricadeId];
-  const [daily, items, outcomes, durations, failures] = await Promise.all([
+  const [daily, items, outcomes, durations, failures, apiTotals, apiDaily] = await Promise.all([
     query<(RowDataPacket & { day: string; executed: number; checks: number })[]>(
       `SELECT DATE_FORMAT(u.day_key, '%Y-%m-%d') AS day,
               COALESCE(SUM(u.executed), 0) AS executed,
@@ -183,6 +191,27 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
        LIMIT 8`,
       span,
     ),
+    query<(RowDataPacket & { id: number; name: string; executed: number; checks: number })[]>(
+      `SELECT a.id, a.name,
+              COALESCE(SUM(u.executed), 0) AS executed,
+              COALESCE(SUM(u.internal_count), 0) AS checks
+       FROM external_apis a
+       LEFT JOIN barricades b ON b.api_id = a.id
+       LEFT JOIN usage_daily u ON u.barricade_id = b.id AND u.day_key BETWEEN ? AND ?
+       GROUP BY a.id, a.name
+       ORDER BY executed DESC, a.name ASC`,
+      [range.from, range.to],
+    ),
+    query<(RowDataPacket & { api_id: number; day: string; executed: number })[]>(
+      `SELECT a.id AS api_id, DATE_FORMAT(u.day_key, '%Y-%m-%d') AS day,
+              COALESCE(SUM(u.executed), 0) AS executed
+       FROM usage_daily u
+       INNER JOIN barricades b ON b.id = u.barricade_id
+       INNER JOIN external_apis a ON a.id = b.api_id
+       WHERE u.day_key BETWEEN ? AND ?
+       GROUP BY a.id, DATE_FORMAT(u.day_key, '%Y-%m-%d')`,
+      [range.from, range.to],
+    ),
   ]);
 
   const byDay = new Map(daily.map((row) => [String(row.day).slice(0, 10), row]));
@@ -218,6 +247,30 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
       latencyMs: outcome?.latency == null ? null : Math.round(Number(outcome.latency)),
     };
   });
+  const usageByApi = new Map<number, Map<string, number>>();
+  for (const row of apiDaily) {
+    const id = Number(row.api_id);
+    const day = String(row.day).slice(0, 10);
+    const bucket = usageByApi.get(id) ?? new Map<string, number>();
+    bucket.set(day, Number(row.executed));
+    usageByApi.set(id, bucket);
+  }
+  const apis: ApiCompare[] = apiTotals.map((row) => {
+    const id = Number(row.id);
+    const byDay = usageByApi.get(id);
+    return {
+      id,
+      name: row.name,
+      real: Number(row.executed),
+      checks: Number(row.checks),
+      series: range.days.map((day) => ({
+        day,
+        label: `${day.slice(8, 10)}/${day.slice(5, 7)}`,
+        real: byDay?.get(day) ?? 0,
+        checks: 0,
+      })),
+    };
+  });
   const focused = barricades.find((item) => item.id === barricadeId) ?? null;
   const scope = focused ? [focused] : barricades;
 
@@ -242,6 +295,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
     focusedId: focused?.id ?? null,
     focusedName: focused?.name ?? null,
     series,
+    apis,
     barricades,
     failures,
     real,
