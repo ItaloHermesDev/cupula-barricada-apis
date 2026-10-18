@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { fieldClass } from "@/app/components/catalog/fields";
 import { alertClass, successClass } from "@/app/components/text-field";
 import { HTTP_METHODS, type CatalogState, type HttpMethod } from "@/lib/catalog";
-import { flattenJson, queryChoices, selectionFromTemplate, type Leaf, type OpenField } from "@/lib/draft";
+import { leavesFromText, queryChoices, selectionFromTemplate, type Leaf, type OpenField } from "@/lib/draft";
 
 type HeaderDraft = { name: string; value: string; keep: boolean };
 type Chosen = { on: boolean; name: string };
@@ -47,18 +47,14 @@ export function ApiBlock({
   const [leaves, setLeaves] = useState<Leaf[]>([]);
   const [pingState, setPingState] = useState<CatalogState>({});
   const [pinging, setPinging] = useState(false);
-  const [appliedPing, setAppliedPing] = useState("");
+  const [pinged, setPinged] = useState(false);
   const template = useMemo(() => templateFromChosen(chosen), [chosen]);
-  const pingBody = pingState.preview?.responseBody ?? "";
-  if (pingBody && pingBody !== appliedPing && (pingState.preview?.status ?? 500) < 400) {
-    setAppliedPing(pingBody);
-    try {
-      setLeaves(flattenJson(JSON.parse(pingBody) as unknown));
-    } catch {
-      setLeaves([]);
-    }
-  }
-  const rows = leaves.length > 0 ? leaves : selectionFromTemplate(draft.responseTemplate).map((item) => ({ path: item.path, sample: "" }));
+  const listed = leaves.length > 0 ? leaves : selectionFromTemplate(draft.responseTemplate).map((item) => ({ path: item.path, sample: "" }));
+  const listedPaths = new Set(listed.map((row) => row.path));
+  const kept = leaves.length > 0
+    ? Object.entries(chosen).filter(([path, item]) => item.on && !listedPaths.has(path)).map(([path]) => ({ path, sample: "" }))
+    : [];
+  const rows = [...kept, ...listed];
   const nameOf = (field: string) => `${prefix}${field}`;
 
   return (
@@ -197,7 +193,10 @@ export function ApiBlock({
             void fetch("/api/ping", { method: "POST", body })
               .then(async (response) => {
                 const data = (await response.json()) as CatalogState;
-                setPingState(data.preview || data.error || data.success ? data : { error: "Não foi possível chamar a API." });
+                const next = data.preview || data.error || data.success ? data : { error: "Não foi possível chamar a API." };
+                setPingState(next);
+                setPinged(true);
+                setLeaves(listedFields(next));
               })
               .catch(() => setPingState({ error: "Não foi possível chamar a API." }))
               .finally(() => setPinging(false));
@@ -212,8 +211,11 @@ export function ApiBlock({
       <div>
         <p className="text-sm text-foreground">O que esta API devolve</p>
         <p className="mt-1 text-xs text-muted">Marque os campos do JSON e dê o nome que quem consome vai receber. Sem marcação, a resposta inteira entra no objeto combinado.</p>
-        {rows.length === 0 ? <p className="mt-3 text-sm text-muted">Faça um ping para ver os campos.</p> : (
-          <div className="mt-3 flex flex-col gap-2">
+        {rows.length === 0 ? (
+          <p className="mt-3 text-sm text-muted">{pinged ? "A resposta não trouxe campos para marcar." : "Faça um ping para ver os campos."}</p>
+        ) : (
+          <div className="mt-3 flex max-h-[28rem] flex-col gap-2 overflow-auto pr-1">
+            {rows.length >= 400 ? <p className="text-xs text-muted">A lista mostra os primeiros 400 campos.</p> : null}
             {rows.map((row) => {
               const item = chosen[row.path] ?? { on: false, name: row.path.split(".").at(-1) ?? row.path };
               return (
@@ -229,6 +231,12 @@ export function ApiBlock({
       </div>
     </section>
   );
+}
+
+function listedFields(data: CatalogState) {
+  const provided = data.preview?.fields;
+  if (Array.isArray(provided)) return provided;
+  return leavesFromText(data.preview?.responseBody ?? "");
 }
 
 function chosenFrom(template: string) {

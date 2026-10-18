@@ -102,6 +102,7 @@ export type CatalogState = {
     status: number | null;
     responseHeaders: Record<string, string>;
     responseBody: string;
+    fields?: { path: string; sample: string }[];
     durationMs: number;
     failure: string;
     transformed: string;

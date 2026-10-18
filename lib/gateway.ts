@@ -7,7 +7,7 @@ import { dayKey } from "@/lib/catalog";
 import { execute } from "@/lib/db";
 import { isSensitiveHeader, maskHeaders, maskText } from "@/lib/secrets";
 import { assertPublicHttpUrl, DestinationError } from "@/lib/ssrf";
-import { splitApiUrl } from "@/lib/draft";
+import { flattenJson, leavesFromText, splitApiUrl } from "@/lib/draft";
 import { admit, clientAddress, collectQuery, hasControlCharacter, isHopHeader, readRequestText } from "@/lib/intake";
 import { combinePayloads } from "@/lib/combine";
 import { listBarricadeSources, recordRouteCall } from "@/lib/sources";
@@ -704,6 +704,11 @@ function failureStatus(failure?: string) {
   return consumerError(failure).status;
 }
 
+function responseFields(body: unknown, text: string) {
+  if (body && typeof body === "object") return flattenJson(body);
+  return leavesFromText(text);
+}
+
 function maskPreview(result: ReturnType<typeof resultShell>, secret: string | string[]) {
   const secrets = (Array.isArray(secret) ? secret : [secret]).filter((item) => item.length >= 4);
   return {
@@ -714,6 +719,10 @@ function maskPreview(result: ReturnType<typeof resultShell>, secret: string | st
     status: result.status,
     responseHeaders: maskHeaders(result.headers),
     responseBody: maskText(result.text, secrets),
+    fields: responseFields(result.body, result.text).map((field) => ({
+      path: field.path,
+      sample: maskText(field.sample, secrets),
+    })),
     durationMs: result.durationMs,
     failure: result.failure ?? "",
     transformed: "",

@@ -179,6 +179,34 @@ const CREATE_LOGS = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `;
 
+const CREATE_TRACKERS = `
+  CREATE TABLE IF NOT EXISTS trackers (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(80) NOT NULL,
+    public_key VARCHAR(80) NOT NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY trackers_public_key_unique (public_key)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
+const CREATE_TRACK_EVENTS = `
+  CREATE TABLE IF NOT EXISTS track_events (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tracker_id INT UNSIGNED NOT NULL,
+    session_id CHAR(32) NOT NULL,
+    event_type VARCHAR(16) NOT NULL,
+    page_url VARCHAR(2000) NOT NULL,
+    button_text VARCHAR(160) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY track_events_tracker_idx (tracker_id, id),
+    KEY track_events_session_idx (tracker_id, session_id),
+    CONSTRAINT track_events_tracker_fk FOREIGN KEY (tracker_id) REFERENCES trackers (id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
 const CREATE_FLAGS = `
   CREATE TABLE IF NOT EXISTS schema_flags (
     flag VARCHAR(64) NOT NULL,
@@ -222,6 +250,7 @@ export function getPool() {
     connectionLimit: 10,
     connectTimeout: 10_000,
     charset: "utf8mb4",
+    timezone: "Z",
   });
 
   return pool;
@@ -293,6 +322,17 @@ export function ensureSchema() {
           "UPDATE barricades SET fallback_on = CONCAT(fallback_on, ',cota') WHERE fallback_on <> '' AND fallback_on NOT LIKE '%cota%'",
         );
         await db.query("INSERT INTO schema_flags (flag) VALUES ('fallback_cota_v1')");
+      }
+      await db.query(CREATE_TRACKERS);
+      await db.query(CREATE_TRACK_EVENTS);
+      const [trilhaRows] = await db.query<RowDataPacket[]>(
+        "SELECT flag FROM schema_flags WHERE flag = 'grant_trilha_nav_v1' LIMIT 1",
+      );
+      if (!trilhaRows[0]) {
+        await db.query(
+          "INSERT IGNORE INTO user_pages (user_id, page_key) SELECT DISTINCT user_id, 'trilha' FROM user_pages WHERE page_key IN ('painel', 'barricadas')",
+        );
+        await db.query("INSERT INTO schema_flags (flag) VALUES ('grant_trilha_nav_v1')");
       }
     })().catch((error: unknown) => {
       schemaReady = null;

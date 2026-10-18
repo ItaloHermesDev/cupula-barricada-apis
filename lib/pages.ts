@@ -21,6 +21,13 @@ export const APP_PAGES = [
     nav: true,
   },
   {
+    key: "trilha",
+    href: "/trilha",
+    label: "Trilha",
+    description: "Tag da landpage: sessão, cliques em botões e páginas visitadas.",
+    nav: true,
+  },
+  {
     key: "usuarios",
     href: "/usuarios",
     label: "Usuários",

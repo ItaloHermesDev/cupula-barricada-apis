@@ -196,10 +196,41 @@ export function templateFromFields(fields: OpenField[]) {
   return JSON.stringify(body);
 }
 
+const FIELD_LIST_LIMIT = 400;
+
 export function flattenJson(value: unknown) {
   const leaves: Leaf[] = [];
-  walk(value, "", leaves);
-  return leaves.slice(0, 80);
+  const queue: { value: unknown; path: string }[] = [{ value, path: "" }];
+  let index = 0;
+  while (index < queue.length && leaves.length < FIELD_LIST_LIMIT) {
+    const current = queue[index++];
+    if (Array.isArray(current.value)) {
+      current.value.slice(0, 3).forEach((item, itemIndex) => {
+        queue.push({ value: item, path: current.path ? `${current.path}.${itemIndex}` : String(itemIndex) });
+      });
+      continue;
+    }
+    if (current.value && typeof current.value === "object") {
+      for (const [key, item] of Object.entries(current.value)) {
+        queue.push({ value: item, path: current.path ? `${current.path}.${key}` : key });
+      }
+      continue;
+    }
+    if (!current.path) continue;
+    const sample = current.value == null ? "" : typeof current.value === "string" ? current.value : JSON.stringify(current.value);
+    leaves.push({ path: current.path, sample: sample.slice(0, 80) });
+  }
+  return leaves;
+}
+
+export function leavesFromText(body: string) {
+  const trimmed = body.trim().replace(/^\uFEFF/, "");
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return [];
+  try {
+    return flattenJson(JSON.parse(trimmed) as unknown);
+  } catch {
+    return [];
+  }
 }
 
 export function selectionFromTemplate(template: string) {
@@ -217,19 +248,3 @@ export function selectionFromTemplate(template: string) {
   }
 }
 
-function walk(value: unknown, path: string, leaves: Leaf[]) {
-  if (leaves.length >= 80) return;
-  if (Array.isArray(value)) {
-    value.slice(0, 5).forEach((item, index) => walk(item, path ? `${path}.${index}` : String(index), leaves));
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const [key, item] of Object.entries(value)) {
-      walk(item, path ? `${path}.${key}` : key, leaves);
-    }
-    return;
-  }
-  if (!path) return;
-  const sample = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
-  leaves.push({ path, sample: sample.slice(0, 80) });
-}
