@@ -212,8 +212,19 @@ body {
   font-size: 0.875rem;
 }
 
-.api-card__dropdown a:hover {
+.api-card__dropdown a:hover,
+.api-card__dropdown button:hover {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.api-card__dropdown button {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.875rem;
+  text-align: left;
+  color: var(--danger);
 }
 
 .api-route {
@@ -300,8 +311,13 @@ body {
 
 .api-card__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 4px;
+}
+
+.api-card__actions form {
+  display: contents;
 }
 
 .api-button {
@@ -328,6 +344,16 @@ body {
 
 .api-button--edit:hover {
   border-color: #7adfff;
+}
+
+.api-button--danger {
+  border-color: rgba(255, 107, 138, 0.75);
+  background: #24141c;
+  color: #ffd0db;
+}
+
+.api-button--danger:hover {
+  border-color: #ff6b8a;
 }
 
 .pulse-dot {

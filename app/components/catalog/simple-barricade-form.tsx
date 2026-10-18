@@ -1,33 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { startTransition, useActionState, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { startTransition, useActionState, useState, type ChangeEvent, type FormEvent } from "react";
 import { renewToken, saveSimpleBarricade } from "@/app/actions/catalog";
+import { ApiBlock, emptyApiSlice, type ApiSlice } from "@/app/components/catalog/api-block";
 import { fieldClass } from "@/app/components/catalog/fields";
 import { alertClass, submitClass, successClass } from "@/app/components/text-field";
-import { HTTP_METHODS, type CatalogState, type HttpMethod } from "@/lib/catalog";
-import { flattenJson, selectionFromTemplate, type Leaf, type OpenField } from "@/lib/draft";
+import { type CatalogState, type HttpMethod } from "@/lib/catalog";
+import { type OpenField } from "@/lib/draft";
 
 const initialState: CatalogState = {};
 
-type HeaderDraft = { name: string; value: string; keep: boolean };
-
-type Chosen = { on: boolean; name: string };
+export type { ApiSlice };
 
 export type SimpleDraft = {
   barricadeId?: number;
   apiId?: number;
   name: string;
+  description: string;
   apiUrl: string;
   apiMethod: HttpMethod;
   bodyMode: "none" | "json" | "form";
-  headers: HeaderDraft[];
+  headers: ApiSlice["headers"];
   fields: OpenField[];
+  queryFields: OpenField[];
   jsonBody: string;
   slug: string;
   origins: string;
   dailyLimit: number;
   responseTemplate: string;
+  monthlyTokens: number | null;
+  requestsPerMinute: number | null;
+  calls: number;
+  sources: ApiSlice[];
   fallbackId: number | null;
   active: boolean;
   tokenPrefix?: string;
@@ -44,41 +49,17 @@ export function SimpleBarricadeForm({
   endpoint: string;
 }) {
   const [saveState, saveAction, saving] = useActionState(saveSimpleBarricade, initialState);
-  const [pingState, setPingState] = useState<CatalogState>({});
-  const [pinging, setPinging] = useState(false);
   const signature = draftSignature(draft);
   const [seen, setSeen] = useState(signature);
-  const [bodyMode, setBodyMode] = useState(draft.bodyMode);
-  const [headers, setHeaders] = useState<HeaderDraft[]>(draft.headers.length > 0 ? draft.headers : [{ name: "", value: "", keep: false }]);
-  const [fields, setFields] = useState<OpenField[]>(draft.fields.length > 0 ? draft.fields : [{ name: "", value: "", open: false }]);
   const [slug, setSlug] = useState(draft.slug);
-  const [slugTouched, setSlugTouched] = useState(Boolean(draft.slug));
-  const [chosen, setChosen] = useState<Record<string, Chosen>>(() => chosenFrom(draft.responseTemplate));
+  const [sources, setSources] = useState(() => listed(draft.sources, "init"));
   if (seen !== signature) {
     setSeen(signature);
-    setBodyMode(draft.bodyMode);
-    setHeaders(draft.headers.length > 0 ? draft.headers : [{ name: "", value: "", keep: false }]);
-    setFields(draft.fields.length > 0 ? draft.fields : [{ name: "", value: "", open: false }]);
     setSlug(draft.slug);
-    setSlugTouched(Boolean(draft.slug));
-    setChosen(chosenFrom(draft.responseTemplate));
+    setSources(listed(draft.sources, signature));
   }
-  const [leaves, setLeaves] = useState<Leaf[]>([]);
-  const [appliedPing, setAppliedPing] = useState("");
-
-  const pingBody = pingState.preview?.responseBody ?? "";
-  if (pingBody && pingBody !== appliedPing && (pingState.preview?.status ?? 500) < 400) {
-    setAppliedPing(pingBody);
-    try {
-      setLeaves(flattenJson(JSON.parse(pingBody) as unknown));
-    } catch {
-      setLeaves([]);
-    }
-  }
-
-  const template = useMemo(() => templateFromChosen(chosen), [chosen]);
-  const rows = leaves.length > 0 ? leaves : selectionFromTemplate(draft.responseTemplate).map((item) => ({ path: item.path, sample: "" }));
   const publicPath = `/api/barricada/${slug || "endereco"}`;
+  const shownUrl = endpoint.includes("/api/barricada/") ? endpoint.replace(/\/api\/barricada\/.*$/, publicPath) : publicPath;
 
   function onSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,8 +72,6 @@ export function SimpleBarricadeForm({
   return (
     <form onSubmit={onSave} className="flex flex-col gap-5">
       {draft.barricadeId ? <input type="hidden" name="id" value={draft.barricadeId} /> : null}
-      {draft.apiId ? <input type="hidden" name="api_id" value={draft.apiId} /> : null}
-      <input type="hidden" name="response_template" value={template} />
       {saveState.error ? <p className={alertClass}>{saveState.error}</p> : null}
       {saveState.success ? <p className={successClass}>{saveState.success}</p> : null}
       {saveState.token ? (
@@ -108,145 +87,66 @@ export function SimpleBarricadeForm({
 
       <div key={seen} className="flex flex-col gap-5">
       <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
-        <h2 className="text-sm font-medium">API</h2>
+        <h2 className="text-sm font-medium">Barricada</h2>
         <label className="text-sm text-foreground">
           Nome
-          <input name="name" required maxLength={120} defaultValue={draft.name} className={fieldClass} onChange={(event) => {
-            if (!slugTouched) setSlug(slugify(event.target.value));
-          }} />
+          <input name="name" required maxLength={120} defaultValue={draft.name} className={fieldClass} onChange={(event) => setSlug(slugify(event.target.value))} />
+        </label>
+        <label className="text-sm text-foreground">
+          Observação
+          <textarea name="description" maxLength={500} rows={3} defaultValue={draft.description} className={fieldClass} />
         </label>
         <LogoField barricadeId={draft.barricadeId} logoUpdatedAt={draft.logoUpdatedAt} />
-        <label className="text-sm text-foreground">
-          URL da API
-          <input name="api_url" required defaultValue={draft.apiUrl} placeholder="https://instagram-scraper-stable-api.p.rapidapi.com/ig_get_fb_profile.php" className={fieldClass} />
-        </label>
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="text-sm text-foreground">
-            Método
-            <select name="api_method" defaultValue={draft.apiMethod} className={fieldClass}>
-              {HTTP_METHODS.map((method) => (
-                <option key={method}>{method}</option>
-              ))}
-            </select>
-          </label>
-          <label className="text-sm text-foreground">
-            Corpo
-            <select name="body_mode" value={bodyMode} onChange={(event) => setBodyMode(event.target.value as SimpleDraft["bodyMode"])} className={fieldClass}>
-              <option value="none">Nenhum</option>
-              <option value="form">Formulário</option>
-              <option value="json">JSON</option>
-            </select>
-          </label>
-        </div>
-
+      </section>
+        <ApiBlock
+          title="API"
+          hint="Esta é a primeira API da barricada."
+          prefix=""
+          pingSource=""
+          draft={{
+            apiId: draft.apiId,
+            apiUrl: draft.apiUrl,
+            apiMethod: draft.apiMethod,
+            bodyMode: draft.bodyMode,
+            headers: draft.headers,
+            fields: draft.fields,
+            queryFields: draft.queryFields,
+            jsonBody: draft.jsonBody,
+            responseTemplate: draft.responseTemplate,
+            monthlyTokens: draft.monthlyTokens,
+            requestsPerMinute: draft.requestsPerMinute,
+            calls: draft.calls,
+          }}
+        />
+        {sources.map((source, index) => (
+          <ApiBlock
+            key={source.uid}
+            title="API combinada"
+            hint="A mesma chamada consulta esta API junto com as outras. A resposta junta os campos de todas."
+            prefix={`s${index}_`}
+            pingSource={String(index)}
+            draft={source.draft}
+            onRemove={() => setSources((current) => current.filter((item) => item.uid !== source.uid))}
+          />
+        ))}
         <div>
-          <p className="text-sm text-foreground">Cabeçalhos</p>
-          <p className="mt-1 text-xs text-muted">A chave da API fica só no servidor. No exemplo da RapidAPI, use x-rapidapi-host e x-rapidapi-key.</p>
-          <div className="mt-3 flex flex-col gap-2">
-            {headers.map((header, index) => (
-              <div key={`header-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
-                <input name="header_key" defaultValue={header.name} placeholder="x-rapidapi-host" className={fieldClass} />
-                <input name="header_value" type={header.keep || /key|token|secret|authorization/i.test(header.name) ? "password" : "text"} autoComplete="off" defaultValue={header.value} placeholder={header.keep ? "Salva. Preencha só para trocar." : "Valor"} className={fieldClass} />
-                <input type="hidden" name="header_keep" value={header.keep ? "1" : "0"} />
-                <button type="button" className="text-sm text-muted" onClick={() => setHeaders((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-                  Remover
-                </button>
-              </div>
-            ))}
-          </div>
-          <button type="button" className="mt-3 text-sm text-accent" onClick={() => setHeaders((current) => [...current, { name: "", value: "", keep: false }])}>
-            Adicionar cabeçalho
-          </button>
-        </div>
-
-        {bodyMode === "form" ? (
-          <div>
-            <p className="text-sm text-foreground">Campos do formulário</p>
-            <p className="mt-1 text-xs text-muted">Marque “quem chama informa” para a barricada aceitar esse valor na URL, por exemplo ?username_or_url=quran. O valor digitado vira o padrão.</p>
-            <div className="mt-3 flex flex-col gap-2">
-              {fields.map((field, index) => (
-                <div key={`field-${index}`} className="grid items-center gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
-                  <input name="field_key" defaultValue={field.name} placeholder="username_or_url" className={fieldClass} />
-                  <input name="field_value" defaultValue={field.value} placeholder="quran" className={fieldClass} />
-                  <input type="hidden" name="field_open" value={field.open ? "1" : "0"} />
-                  <label className="flex items-center gap-2 text-xs text-muted">
-                    <input type="checkbox" checked={field.open} onChange={(event) => setFields((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, open: event.target.checked } : item))} />
-                    Quem chama informa
-                  </label>
-                  <button type="button" className="text-sm text-muted" onClick={() => setFields((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-                    Remover
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button type="button" className="mt-3 text-sm text-accent" onClick={() => setFields((current) => [...current, { name: "", value: "", open: false }])}>
-              Adicionar campo
-            </button>
-          </div>
-        ) : null}
-        {bodyMode === "json" ? (
-          <label className="text-sm text-foreground">
-            JSON enviado à API
-            <textarea name="json_body" defaultValue={draft.jsonBody} rows={6} className={`${fieldClass} font-mono`} placeholder='{"consulta":"{{consumer.query.consulta}}"}' />
-          </label>
-        ) : null}
-        <div>
-          {pingState.error ? <p className={`${alertClass} mb-3`}>{pingState.error}</p> : null}
-          {pingState.success ? <p className={`${successClass} mb-3`}>{pingState.success}</p> : null}
           <button
             type="button"
-            disabled={pinging}
-            className="rounded-[12px] border border-accent/50 px-4 py-2 text-sm text-accent disabled:opacity-60"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const form = event.currentTarget.form;
-              if (!form || pinging) return;
-              const body = new FormData(form);
-              setPinging(true);
-              void fetch("/api/ping", { method: "POST", body })
-                .then(async (response) => {
-                  const data = (await response.json()) as CatalogState;
-                  setPingState(data.preview || data.error || data.success ? data : { error: "Não foi possível chamar a API." });
-                })
-                .catch(() => setPingState({ error: "Não foi possível chamar a API." }))
-                .finally(() => setPinging(false));
-            }}
+            className="text-sm text-accent disabled:opacity-60"
+            disabled={sources.length >= 5}
+            onClick={() => setSources((current) => [...current, { uid: `novo-${current.length}-${Date.now()}`, draft: emptyApiSlice() }])}
           >
-            {pinging ? "Chamando..." : "Ping"}
+            Combinar outra API
           </button>
+          <p className="mt-1 text-xs text-muted">Até 5 APIs além da primeira. Quem chama continua usando um único endereço e um único token.</p>
         </div>
-        {pingState.preview?.responseBody ? (
-          <pre className="max-h-72 overflow-auto rounded-[12px] border border-line bg-background p-3 text-xs leading-5 text-foreground">{pingState.preview.responseBody}</pre>
-        ) : null}
-      </section>
-
-      <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
-        <h2 className="text-sm font-medium">O que a barricada devolve</h2>
-        <p className="text-xs text-muted">Marque os campos do JSON e dê o nome que quem consome vai receber. Sem marcação, a resposta inteira é devolvida.</p>
-        {rows.length === 0 ? <p className="text-sm text-muted">Faça um ping para ver os campos.</p> : (
-          <div className="flex flex-col gap-2">
-            {rows.map((row) => {
-              const item = chosen[row.path] ?? { on: false, name: row.path.split(".").at(-1) ?? row.path };
-              return (
-                <div key={row.path} className="grid items-center gap-2 sm:grid-cols-[auto_1fr_1fr]">
-                  <input type="checkbox" checked={item.on} onChange={(event) => setChosen((current) => ({ ...current, [row.path]: { ...item, on: event.target.checked } }))} aria-label={`Enviar ${row.path}`} />
-                  <span className="truncate font-mono text-xs text-muted" title={row.sample}>{row.path}</span>
-                  <input value={item.name} onChange={(event) => setChosen((current) => ({ ...current, [row.path]: { on: current[row.path]?.on ?? item.on, name: event.target.value } }))} className={fieldClass} aria-label={`Nome de ${row.path}`} />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
       <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
         <h2 className="text-sm font-medium">Quem pode chamar</h2>
         <label className="text-sm text-foreground">
           URL da barricada
-          <input name="slug" required value={slug} onChange={(event) => { setSlugTouched(true); setSlug(event.target.value); }} placeholder="instagram/perfil" className={fieldClass} />
+          <input name="slug" required value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="instagram/perfil" className={fieldClass} />
         </label>
-        <p className="font-mono text-xs text-muted">{endpoint || publicPath}</p>
+        <p className="font-mono text-xs text-muted">{shownUrl}</p>
         {draft.tokenPrefix ? (
           <p className="text-sm text-muted">Token atual: <span className="font-mono">{draft.tokenPrefix}</span>••••</p>
         ) : (
@@ -262,8 +162,9 @@ export function SimpleBarricadeForm({
         <p className="text-xs text-muted">Uma por linha. Em branco, qualquer origem passa. Com uma URL na lista, o pedido precisa enviar o cabeçalho Origin com essa URL. O token continua obrigatório.</p>
         <label className="text-sm text-foreground">
           Consumo por dia
-          <input name="daily_limit" type="number" min={0} defaultValue={draft.dailyLimit} className={fieldClass} />
+          <input name="daily_limit" type="number" min={-1} defaultValue={draft.dailyLimit} className={fieldClass} />
         </label>
+        <p className="text-xs text-muted">-1 deixa o consumo sem limite. O contador reinicia à meia-noite de Brasília.</p>
         <label className="text-sm text-foreground">
           Se falhar, usar
           <select name="fallback_id" defaultValue={draft.fallbackId ?? ""} className={fieldClass}>
@@ -356,16 +257,22 @@ function draftSignature(draft: SimpleDraft) {
     barricadeId: draft.barricadeId ?? null,
     apiId: draft.apiId ?? null,
     name: draft.name,
+    description: draft.description,
     apiUrl: draft.apiUrl,
     apiMethod: draft.apiMethod,
     bodyMode: draft.bodyMode,
     headers: draft.headers,
     fields: draft.fields,
+    queryFields: draft.queryFields,
     jsonBody: draft.jsonBody,
     slug: draft.slug,
     origins: draft.origins,
     dailyLimit: draft.dailyLimit,
     responseTemplate: draft.responseTemplate,
+    monthlyTokens: draft.monthlyTokens,
+    requestsPerMinute: draft.requestsPerMinute,
+    calls: draft.calls,
+    sources: draft.sources,
     fallbackId: draft.fallbackId,
     active: draft.active,
     tokenPrefix: draft.tokenPrefix ?? "",
@@ -373,20 +280,8 @@ function draftSignature(draft: SimpleDraft) {
   });
 }
 
-function chosenFrom(template: string) {
-  const chosen: Record<string, Chosen> = {};
-  for (const item of selectionFromTemplate(template)) chosen[item.path] = { on: true, name: item.name };
-  return chosen;
-}
-
-function templateFromChosen(chosen: Record<string, Chosen>) {
-  const body: Record<string, string> = {};
-  for (const [path, item] of Object.entries(chosen)) {
-    const name = item.name.trim();
-    if (!item.on || !name) continue;
-    body[name] = `{{${path}}}`;
-  }
-  return Object.keys(body).length > 0 ? JSON.stringify(body) : "";
+function listed(sources: ApiSlice[], stamp: string) {
+  return sources.map((item, index) => ({ uid: `${stamp}-${index}`, draft: item }));
 }
 
 function slugify(value: string) {

@@ -36,6 +36,117 @@ export type InstructionField = {
 };
 
 const QUERY_FIELD = /^\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)\s*(?:\|\s*([^}]*))?\s*\}\}$/;
+const QUERY_PLACEHOLDER = /\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)\s*(?:\|\s*([^}]*))?\s*\}\}/g;
+const SECRET_QUERY = /authorization|api[-_]?key|token|secret|password|cookie/i;
+
+export type CallParameter = {
+  name: string;
+  value: string;
+  required: boolean;
+};
+
+export function callParameters(input: {
+  endpointPath: string;
+  query: { name: string; value: string }[];
+  pathParams: { name: string; value: string }[];
+  bodyTemplate: string;
+  params: { name: string; required: boolean }[];
+}) {
+  const found = new Map<string, CallParameter>();
+
+  function add(param: CallParameter) {
+    const name = param.name.trim();
+    if (!name || SECRET_QUERY.test(name)) return;
+    const current = found.get(name);
+    if (!current) {
+      found.set(name, { ...param, name });
+      return;
+    }
+    current.required = current.required || param.required;
+    if (!current.value && param.value) current.value = param.value;
+  }
+
+  function scan(text: string) {
+    QUERY_PLACEHOLDER.lastIndex = 0;
+    for (const match of text.matchAll(QUERY_PLACEHOLDER)) {
+      add({ name: match[1], value: (match[2] ?? "").trim(), required: false });
+    }
+  }
+
+  scan(input.endpointPath.split("?")[0] ?? "");
+  for (const pair of endpointQuery(input.endpointPath)) scan(pair.value);
+  for (const pair of input.query) scan(pair.value);
+  for (const pair of input.pathParams) scan(pair.value);
+  scan(input.bodyTemplate);
+
+  if (input.params.length > 0) {
+    const allowed = new Set(input.params.map((param) => param.name));
+    for (const name of found.keys()) {
+      if (!allowed.has(name)) found.delete(name);
+    }
+    for (const param of input.params) {
+      const current = found.get(param.name);
+      if (current) current.required = current.required || param.required;
+      else add({ name: param.name, value: "", required: param.required });
+    }
+  }
+
+  return [...found.values()];
+}
+
+export function queryChoices(rawUrl: string, previous: OpenField[] = []) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl.trim());
+  } catch {
+    return [];
+  }
+  const openByName = new Map(previous.map((item) => [item.name, item.open]));
+  return [...url.searchParams].flatMap(([name, value]): OpenField[] => {
+    if (!name || SECRET_QUERY.test(name)) return [];
+    return [{ name, value, open: openByName.get(name) ?? false }];
+  });
+}
+
+export function presentApiTarget(baseUrl: string, endpointPath: string) {
+  const path = endpointPath.split("?")[0] ?? "";
+  const queryFields = endpointQuery(endpointPath).flatMap((pair): OpenField[] => {
+    if (SECRET_QUERY.test(pair.name)) return [];
+    const saved = pair.value.match(QUERY_FIELD);
+    if (saved) return [{ name: pair.name, value: (saved[2] ?? "").trim(), open: true }];
+    return [{ name: pair.name, value: pair.value, open: false }];
+  });
+  const search = new URLSearchParams();
+  for (const pair of endpointQuery(endpointPath)) {
+    const field = queryFields.find((item) => item.name === pair.name);
+    search.append(pair.name, field ? field.value : pair.value);
+  }
+  const query = search.toString();
+  const base = baseUrl.replace(/\/$/, "");
+  return { apiUrl: `${base}${path}${query ? `?${query}` : ""}`, queryFields };
+}
+
+export function splitApiUrlWithOpen(raw: string, openNames: string[]) {
+  const url = new URL(raw.trim());
+  const open = new Set(openNames);
+  const parts: string[] = [];
+  for (const [name, value] of url.searchParams) {
+    if (open.has(name) && !SECRET_QUERY.test(name)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("O nome do parâmetro usa letras, números, _ ou -.");
+      if (/[{}|]/.test(value)) throw new Error("O valor padrão do parâmetro não pode conter {, } ou |.");
+      parts.push(`${encodeURIComponent(name)}={{consumer.query.${name}|${value}}}`);
+      continue;
+    }
+    parts.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
+  }
+  return { baseUrl: url.origin, endpointPath: `${url.pathname}${parts.length ? `?${parts.join("&")}` : ""}` };
+}
+
+function endpointQuery(endpointPath: string) {
+  const query = endpointPath.split("?")[1]?.split("#")[0] ?? "";
+  if (!query) return [];
+  return [...new URLSearchParams(query)].map(([name, value]) => ({ name, value }));
+}
 
 export function instructionFields(template: string): InstructionField[] {
   let parsed: unknown;

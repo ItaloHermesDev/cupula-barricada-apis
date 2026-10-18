@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { removeBarricade } from "@/app/actions/catalog";
 import { BarricadeMark } from "@/app/components/catalog/barricade-mark";
 
 export type BarricadeCardData = {
@@ -31,6 +32,12 @@ export function BarricadeCard({ item }: { item: BarricadeCardData }) {
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
+
+  const formId = `excluir-barricada-${item.id}`;
+
+  function confirmDelete(event: FormEvent<HTMLFormElement>) {
+    if (!window.confirm(`Excluir ${item.name}?`)) event.preventDefault();
+  }
 
   function copyPath() {
     setCopied(true);
@@ -88,6 +95,8 @@ export function BarricadeCard({ item }: { item: BarricadeCardData }) {
             <div className="api-card__dropdown">
               <Link href={`/barricadas/${item.id}`} onClick={() => setMenuOpen(false)}>Ver</Link>
               <Link href={`/barricadas/${item.id}/editar`} onClick={() => setMenuOpen(false)}>Editar</Link>
+              <Link href={`/barricadas/${item.id}/logs`} onClick={() => setMenuOpen(false)}>Logs</Link>
+              <button type="submit" form={formId} onClick={() => setMenuOpen(false)}>Excluir</button>
             </div>
           ) : null}
         </div>
@@ -121,6 +130,17 @@ export function BarricadeCard({ item }: { item: BarricadeCardData }) {
           <PencilIcon />
           Editar
         </Link>
+        <Link href={`/barricadas/${item.id}/logs`} className="api-button">
+          <LogsIcon />
+          Logs
+        </Link>
+        <form id={formId} action={removeBarricade} onSubmit={confirmDelete}>
+          <input type="hidden" name="id" value={item.id} />
+          <button type="submit" className="api-button api-button--danger">
+            <TrashIcon />
+            Excluir
+          </button>
+        </form>
       </footer>
     </article>
   );
@@ -160,6 +180,27 @@ function EyeIcon() {
     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
       <path d="M2.5 12S6.5 6.5 12 6.5 21.5 12 21.5 12 17.5 17.5 12 17.5 2.5 12 2.5 12Z" />
       <circle cx="12" cy="12" r="2.4" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M4 7h16" />
+      <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+      <path d="M7 7l.8 12.2A1.5 1.5 0 0 0 9.3 20.5h5.4a1.5 1.5 0 0 0 1.5-1.3L17 7" />
+    </svg>
+  );
+}
+
+function LogsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+      <path d="M8 7h8" />
+      <path d="M8 12h8" />
+      <path d="M8 17h5" />
+      <rect x="4" y="4" width="16" height="16" rx="2" />
     </svg>
   );
 }

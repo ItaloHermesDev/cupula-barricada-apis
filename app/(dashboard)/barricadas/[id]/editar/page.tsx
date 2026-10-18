@@ -7,12 +7,14 @@ import { BarricadePageLinks } from "@/app/components/catalog/barricade-links";
 import { DeleteButton } from "@/app/components/catalog/fields";
 import { SimpleBarricadeForm } from "@/app/components/catalog/simple-barricade-form";
 import { PageFallback } from "@/app/components/dashboard-shell";
-import { getApi } from "@/lib/apis";
+import type { ApiSlice } from "@/app/components/catalog/api-block";
+import { getApi, type ApiRecord } from "@/lib/apis";
 import { getBarricade, listBarricades } from "@/lib/barricades";
 import { dayKey } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
-import { bodyModeOf, fieldsFromTemplate, joinApiUrl } from "@/lib/draft";
+import { bodyModeOf, fieldsFromTemplate, presentApiTarget } from "@/lib/draft";
 import { isSensitiveHeader } from "@/lib/secrets";
+import { listBarricadeSources, listRouteStats } from "@/lib/sources";
 
 export const metadata: Metadata = { title: "Editar barricada" };
 
@@ -37,9 +39,22 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
   if (!current) notFound();
   const api = await getApi(current.apiId);
   if (!api) notFound();
+  const [linked, usage] = await Promise.all([
+    listBarricadeSources(current.id),
+    listRouteStats(current.id),
+  ]);
+  const usageOf = (apiId: number) => usage.find((item) => item.apiId === apiId);
+  const sources: ApiSlice[] = [];
+  for (const source of linked) {
+    const linkedApi = await getApi(source.apiId);
+    if (!linkedApi) continue;
+    sources.push(apiSlice(linkedApi, source.responseTemplate, usageOf(linkedApi.id)));
+  }
+  const primaryUsage = usageOf(api.id);
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "";
   const proto = headerList.get("x-forwarded-proto") ?? "http";
   const mode = bodyModeOf(api.requestContentType, api.bodyTemplate);
+  const presented = presentApiTarget(api.baseUrl, api.endpointPath);
 
   return (
     <div className="flex flex-col gap-5">
@@ -53,7 +68,9 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
           barricadeId: current.id,
           apiId: api.id,
           name: current.name,
-          apiUrl: joinApiUrl(api.baseUrl, api.endpointPath),
+          description: current.description,
+          apiUrl: presented.apiUrl,
+          queryFields: presented.queryFields,
           apiMethod: api.method,
           bodyMode: mode,
           headers: api.headers.map((header) => ({
@@ -67,6 +84,10 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
           origins: current.origins.join("\n"),
           dailyLimit: current.dailyLimit,
           responseTemplate: current.responseTemplate,
+          monthlyTokens: primaryUsage?.monthlyTokens ?? null,
+          requestsPerMinute: primaryUsage?.requestsPerMinute ?? null,
+          calls: primaryUsage?.calls ?? 0,
+          sources,
           fallbackId: current.fallbackId,
           active: current.active,
           tokenPrefix: current.tokenPrefix,
@@ -76,4 +97,27 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
       <DeleteButton action={removeBarricade} id={current.id} message="Excluir esta barricada?" />
     </div>
   );
+}
+
+function apiSlice(api: ApiRecord, responseTemplate: string, usage?: { monthlyTokens: number | null; requestsPerMinute: number | null; calls: number }): ApiSlice {
+  const mode = bodyModeOf(api.requestContentType, api.bodyTemplate);
+  const presented = presentApiTarget(api.baseUrl, api.endpointPath);
+  return {
+    apiId: api.id,
+    apiUrl: presented.apiUrl,
+    queryFields: presented.queryFields,
+    apiMethod: api.method,
+    bodyMode: mode,
+    headers: api.headers.map((header) => ({
+      name: header.name,
+      value: isSensitiveHeader(header.name) ? "" : header.value,
+      keep: isSensitiveHeader(header.name) && Boolean(header.value),
+    })),
+    fields: mode === "form" ? fieldsFromTemplate(api.bodyTemplate) : [],
+    jsonBody: mode === "json" ? api.bodyTemplate : "",
+    responseTemplate,
+    monthlyTokens: usage?.monthlyTokens ?? null,
+    requestsPerMinute: usage?.requestsPerMinute ?? null,
+    calls: usage?.calls ?? 0,
+  };
 }

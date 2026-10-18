@@ -14,7 +14,7 @@ export function CallExample({
   method: string;
   url: string;
   env: string;
-  fields: { name: string; value: string; jsonName?: string }[];
+  fields: { name: string; value: string; required?: boolean }[];
   origins: string[];
   response: string;
 }) {
@@ -93,7 +93,7 @@ function buildPrompt({
   method: string;
   url: string;
   env: string;
-  fields: { name: string; value: string; jsonName?: string }[];
+  fields: { name: string; value: string; required?: boolean }[];
   origin: string;
   response: string;
 }) {
@@ -111,17 +111,22 @@ function buildPrompt({
   if (origin) lines.push(`Origin: ${origin}`, "", `Origin é obrigatório e deve ser exatamente ${origin}.`);
   lines.push("");
   if (fields.length === 0) {
-    lines.push("Esta URL não recebe parâmetros.");
+    lines.push(
+      "Chamada sem parâmetros.",
+      "Use a URL exatamente como está, sem query string.",
+    );
   } else {
     lines.push(
-      "Parâmetros na URL:",
-      "O nome do parâmetro na URL da barricada é o nome do campo no JSON enviado à API. O valor informado na URL é o valor enviado nesse campo.",
+      "Chamada com parâmetros na URL.",
+      "Envie os parâmetros na query string da URL, no formato nome=valor.",
+      "Troque {nome} pelo valor da chamada.",
+      "Padrão preenchido é o valor usado quando a chamada omite o parâmetro. Padrão nenhum significa que a omissão segue sem esse parâmetro.",
+      "Obrigatório sim exige o parâmetro na URL. Sem ele, a barricada recusa a chamada.",
     );
     for (const field of fields) {
-      const jsonName = field.jsonName && field.jsonName !== field.name ? field.jsonName : field.name;
-      const target = `A barricada envia esse valor no campo ${jsonName} do JSON da API.`;
-      const fallback = field.value ? ` Se o parâmetro não for enviado, a barricada usa ${field.value}.` : "";
-      lines.push(`- ${field.name}: na URL, use ${field.name}={${field.name}}. ${target}${fallback}`);
+      const fallback = field.value ? field.value : "nenhum";
+      const required = field.required ? "sim" : "não";
+      lines.push(`- ${field.name}={${field.name}} | padrão: ${fallback} | obrigatório: ${required}`);
     }
   }
   lines.push("", "A resposta tem esta forma:", response);

@@ -14,6 +14,9 @@ export function BarricadePageLinks({ id }: { id: number }) {
       <Link href={`/barricadas/${id}/editar`} className={itemClass}>
         Editar
       </Link>
+      <Link href={`/barricadas/${id}/logs`} className={itemClass}>
+        Logs
+      </Link>
     </div>
   );
 }

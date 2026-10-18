@@ -96,6 +96,22 @@ export function fillString(template: string, consumer: ConsumerContext) {
   return typeof rendered === "string" ? rendered : rendered == null ? "" : JSON.stringify(rendered);
 }
 
+const CONTROL = /[\u0000-\u001F\u007F]/;
+
+export function fillUrlPath(template: string, consumer: ConsumerContext) {
+  let safe = true;
+  const path = template.replace(/\{\{\s*([^|}]+?)\s*(?:\|\s*([^}]*))?\s*\}\}/g, (_match, key: string, fallback?: string) => {
+    const value = resolve(key, fallback, {}, consumer);
+    const text = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
+    if (CONTROL.test(text)) {
+      safe = false;
+      return "";
+    }
+    return encodeURIComponent(text);
+  });
+  return safe ? path : null;
+}
+
 export function validateResponseTemplate(template: string) {
   const trimmed = template.trim();
   if (!trimmed) return null;

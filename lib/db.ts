@@ -89,6 +89,34 @@ const CREATE_BARRICADES = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `;
 
+const CREATE_SOURCES = `
+  CREATE TABLE IF NOT EXISTS barricade_sources (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    barricade_id INT UNSIGNED NOT NULL,
+    api_id INT UNSIGNED NOT NULL,
+    position INT UNSIGNED NOT NULL,
+    response_template MEDIUMTEXT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY barricade_sources_position (barricade_id, position),
+    KEY barricade_sources_api_idx (api_id),
+    CONSTRAINT barricade_sources_barricade_fk FOREIGN KEY (barricade_id) REFERENCES barricades (id) ON DELETE CASCADE,
+    CONSTRAINT barricade_sources_api_fk FOREIGN KEY (api_id) REFERENCES external_apis (id) ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
+const CREATE_ROUTE_STATS = `
+  CREATE TABLE IF NOT EXISTS barricade_api_stats (
+    barricade_id INT UNSIGNED NOT NULL,
+    api_id INT UNSIGNED NOT NULL,
+    monthly_tokens BIGINT UNSIGNED NULL,
+    requests_per_minute INT UNSIGNED NULL,
+    calls BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (barricade_id, api_id),
+    CONSTRAINT barricade_api_stats_barricade_fk FOREIGN KEY (barricade_id) REFERENCES barricades (id) ON DELETE CASCADE,
+    CONSTRAINT barricade_api_stats_api_fk FOREIGN KEY (api_id) REFERENCES external_apis (id) ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
 const CREATE_LOGOS = `
   CREATE TABLE IF NOT EXISTS barricade_logos (
     barricade_id INT UNSIGNED NOT NULL,
@@ -143,6 +171,7 @@ const CREATE_LOGS = `
     failure_reason VARCHAR(255) NULL,
     counted TINYINT(1) NOT NULL DEFAULT 0,
     consumer_key VARCHAR(80) NULL,
+    log_scope VARCHAR(16) NOT NULL DEFAULT 'geral',
     PRIMARY KEY (id),
     KEY call_logs_day_idx (day_key, id),
     KEY call_logs_barricade_idx (barricade_id, id),
@@ -213,11 +242,15 @@ export function ensureSchema() {
       await db.query(CREATE_APIS);
       await db.query(CREATE_BARRICADES);
       await ensureBarricadeColumns(db);
+      await db.query(CREATE_SOURCES);
+      await db.query(CREATE_ROUTE_STATS);
+      await ensureSignedDailyLimit(db);
       await db.query(CREATE_LOGOS);
       await db.query(CREATE_USAGE);
       await ensureColumn(db, "usage_daily", "internal_count", "INT UNSIGNED NOT NULL DEFAULT 0");
       await db.query(CREATE_MINUTES);
       await db.query(CREATE_LOGS);
+      await ensureColumn(db, "call_logs", "log_scope", "VARCHAR(16) NOT NULL DEFAULT 'geral'");
       await db.query(CREATE_FLAGS);
       const [flagRows] = await db.query<RowDataPacket[]>(
         "SELECT flag FROM schema_flags WHERE flag = 'grant_ops_pages_v1' LIMIT 1",
@@ -243,6 +276,15 @@ export function ensureSchema() {
         );
         await db.query("INSERT INTO schema_flags (flag) VALUES ('grant_painel_nav_v1')");
       }
+      const [statusRows] = await db.query<RowDataPacket[]>(
+        "SELECT flag FROM schema_flags WHERE flag = 'grant_status_nav_v1' LIMIT 1",
+      );
+      if (!statusRows[0]) {
+        await db.query(
+          "INSERT IGNORE INTO user_pages (user_id, page_key) SELECT user_id, 'status' FROM user_pages WHERE page_key = 'barricadas'",
+        );
+        await db.query("INSERT INTO schema_flags (flag) VALUES ('grant_status_nav_v1')");
+      }
       const [cotaRows] = await db.query<RowDataPacket[]>(
         "SELECT flag FROM schema_flags WHERE flag = 'fallback_cota_v1' LIMIT 1",
       );
@@ -262,6 +304,17 @@ export function ensureSchema() {
   return schemaReady;
 }
 
+async function ensureSignedDailyLimit(db: Pool) {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT COLUMN_TYPE AS column_type FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'barricades' AND COLUMN_NAME = 'daily_limit'`,
+  );
+  const columnType = String(rows[0]?.column_type ?? "");
+  if (columnType.toLowerCase().includes("unsigned")) {
+    await db.query("ALTER TABLE barricades MODIFY daily_limit INT NOT NULL DEFAULT 1000");
+  }
+}
+
 async function ensureBarricadeColumns(db: Pool) {
   const columns: [string, string][] = [
     ["token_cipher", "TEXT NULL"],
@@ -270,6 +323,7 @@ async function ensureBarricadeColumns(db: Pool) {
     ["health_checked_at", "TIMESTAMP NULL"],
     ["health_latency_ms", "INT UNSIGNED NULL"],
     ["health_detail", "VARCHAR(160) NULL"],
+    ["health_image", "TEXT NULL"],
     ["health_interval_minutes", "INT UNSIGNED NOT NULL DEFAULT 10"],
   ];
   for (const [name, definition] of columns) {

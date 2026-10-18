@@ -40,11 +40,11 @@ export async function dashboardStats() {
         SUM(outcome IN ('sucesso', 'fallback')) AS success,
         AVG(CASE WHEN outcome <> 'rejeitada' THEN duration_ms END) AS latency,
         SUM(outcome = 'fallback') AS fallback
-       FROM call_logs WHERE day_key = ? AND outcome <> 'verificacao'`,
+       FROM call_logs WHERE day_key = ? AND outcome <> 'verificacao' AND log_scope = 'geral'`,
       [day],
     ),
     query<LogRow[]>(
-      "SELECT * FROM call_logs WHERE outcome IN ('falha', 'rejeitada') ORDER BY id DESC LIMIT 8",
+      "SELECT * FROM call_logs WHERE outcome IN ('falha', 'rejeitada') AND log_scope = 'geral' ORDER BY id DESC LIMIT 8",
     ),
     query<(RowDataPacket & { name: string; daily_limit: number; used_today: number })[]>(
       `SELECT b.name, b.daily_limit, COALESCE(u.executed, 0) AS used_today
@@ -56,12 +56,12 @@ export async function dashboardStats() {
     ),
     query<(RowDataPacket & { name: string; total: number })[]>(
       `SELECT api_name AS name, COUNT(*) AS total FROM call_logs
-       WHERE day_key = ? AND outcome NOT IN ('rejeitada', 'verificacao') GROUP BY api_name ORDER BY total DESC LIMIT 6`,
+       WHERE day_key = ? AND log_scope = 'geral' AND outcome NOT IN ('rejeitada', 'verificacao') GROUP BY api_name ORDER BY total DESC LIMIT 6`,
       [day],
     ),
     query<(RowDataPacket & { name: string; total: number })[]>(
       `SELECT barricade_name AS name, COUNT(*) AS total FROM call_logs
-       WHERE day_key = ? AND outcome <> 'verificacao' AND barricade_name <> 'Verificação' GROUP BY barricade_name ORDER BY total DESC LIMIT 6`,
+       WHERE day_key = ? AND log_scope = 'geral' AND outcome <> 'verificacao' AND barricade_name <> 'Verificação' GROUP BY barricade_name ORDER BY total DESC LIMIT 6`,
       [day],
     ),
   ]);
@@ -167,7 +167,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
               SUM(outcome IN ('sucesso', 'fallback')) AS success,
               AVG(CASE WHEN outcome NOT IN ('rejeitada', 'verificacao') THEN duration_ms END) AS latency
        FROM call_logs
-       WHERE day_key BETWEEN ? AND ?
+       WHERE day_key BETWEEN ? AND ? AND log_scope = 'geral'
        GROUP BY barricade_id`,
       [range.from, range.to],
     ),
@@ -175,6 +175,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
       `SELECT l.duration_ms FROM call_logs l
        INNER JOIN barricades b ON b.id = l.barricade_id
        WHERE l.day_key BETWEEN ? AND ?
+         AND l.log_scope = 'geral'
          AND (? = 0 OR l.barricade_id = ?)
          AND l.outcome NOT IN ('rejeitada', 'verificacao')
        ORDER BY l.duration_ms ASC
@@ -185,6 +186,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
       `SELECT l.* FROM call_logs l
        INNER JOIN barricades b ON b.id = l.barricade_id
        WHERE l.outcome IN ('falha', 'rejeitada')
+         AND l.log_scope = 'geral'
          AND l.day_key BETWEEN ? AND ?
          AND (? = 0 OR l.barricade_id = ?)
        ORDER BY l.id DESC
@@ -354,7 +356,7 @@ function dayKeysBetween(from: string, to: string) {
 
 export async function outcomeSamples() {
   return query<(RowDataPacket & { api_id: number | null; barricade_id: number | null; outcome: string; duration_ms: number })[]>(
-    "SELECT api_id, barricade_id, outcome, duration_ms FROM call_logs WHERE outcome NOT IN ('rejeitada', 'verificacao') ORDER BY id DESC LIMIT 300",
+    "SELECT api_id, barricade_id, outcome, duration_ms FROM call_logs WHERE log_scope = 'geral' AND outcome NOT IN ('rejeitada', 'verificacao') ORDER BY id DESC LIMIT 300",
   );
 }
 
@@ -380,10 +382,11 @@ export async function searchLogs(filters: {
   from?: string;
   to?: string;
   sort?: string;
+  scope?: "geral" | "api";
   page: number;
 }) {
-  const where = ["1 = 1"];
-  const params: (string | number)[] = [];
+  const where = ["log_scope = ?"];
+  const params: (string | number)[] = [filters.scope === "api" ? "api" : "geral"];
   if (filters.apiId) {
     where.push("api_id = ?");
     params.push(filters.apiId);

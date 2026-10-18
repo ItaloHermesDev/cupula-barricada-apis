@@ -25,6 +25,7 @@ async function NewBarricade() {
       endpoint=""
       draft={{
         name: "",
+        description: "",
         apiUrl: "https://",
         apiMethod: "POST",
         bodyMode: "form",
@@ -36,11 +37,16 @@ async function NewBarricade() {
           { name: "data", value: "basic", open: false },
           { name: "username_or_url", value: "", open: true },
         ],
+        queryFields: [],
         jsonBody: "",
         slug: "",
         origins: "",
         dailyLimit: 1000,
         responseTemplate: "",
+        monthlyTokens: null,
+        requestsPerMinute: null,
+        calls: 0,
+        sources: [],
         fallbackId: null,
         active: true,
       }}

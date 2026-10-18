@@ -92,14 +92,14 @@ export function BarricadeForm({
         <div className="grid gap-4 md:grid-cols-2">
           <label className="text-sm text-foreground">
             Limite diário
-            <input name="daily_limit" type="number" min={0} defaultValue={barricade?.dailyLimit ?? 1000} className={fieldClass} />
+            <input name="daily_limit" type="number" min={-1} defaultValue={barricade?.dailyLimit ?? 1000} className={fieldClass} />
           </label>
           <label className="text-sm text-foreground">
             Limite por minuto
             <input name="minute_limit" type="number" min={0} defaultValue={barricade?.minuteLimit ?? 60} className={fieldClass} />
           </label>
         </div>
-        <p className="text-xs text-muted">Zero remove o limite. O contador diário reinicia à meia-noite de Brasília. Ao estourar, a chamada é bloqueada e o provedor não é consultado.</p>
+        <p className="text-xs text-muted">-1 deixa sem limite. O contador diário reinicia à meia-noite de Brasília. Ao estourar, a chamada é bloqueada e o provedor não é consultado.</p>
         <ParamList rows={barricade?.params ?? []} />
         <HeaderAllowList rows={barricade?.allowedHeaders ?? []} />
         <label className="text-sm text-foreground">

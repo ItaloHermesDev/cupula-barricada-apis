@@ -51,7 +51,7 @@ async function Barricades() {
 
 function cardOf(item: BarricadeRecord): BarricadeCardData {
   const status = statusOf(item);
-  const used = item.dailyLimit > 0 ? `${item.usedToday} / ${item.dailyLimit}` : String(item.usedToday);
+  const used = item.dailyLimit > 0 ? `${item.usedToday} / ${item.dailyLimit}` : `${item.usedToday} · sem limite`;
   const stamp = item.logoUpdatedAt instanceof Date ? String(item.logoUpdatedAt.getTime()) : item.logoUpdatedAt;
   return {
     id: item.id,

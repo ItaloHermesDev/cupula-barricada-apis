@@ -30,8 +30,12 @@ export const getCurrentUser = cache(async () => {
 });
 
 export async function requirePage(pageKey: PageKey) {
+  return requireAnyPage(pageKey);
+}
+
+export async function requireAnyPage(...pageKeys: PageKey[]) {
   const user = await getCurrentUser();
-  if (user.pages.includes(pageKey)) return user;
+  if (pageKeys.some((pageKey) => user.pages.includes(pageKey))) return user;
 
   const nextPage = APP_PAGES.find((page) => user.pages.includes(page.key));
   redirect(nextPage?.href ?? "/sem-acesso");

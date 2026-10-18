@@ -14,6 +14,13 @@ export const APP_PAGES = [
     nav: true,
   },
   {
+    key: "status",
+    href: "/status",
+    label: "Status",
+    description: "Se cada barricada está funcionando, a verificação e uma chamada de teste.",
+    nav: true,
+  },
+  {
     key: "usuarios",
     href: "/usuarios",
     label: "Usuários",

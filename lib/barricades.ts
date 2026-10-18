@@ -43,6 +43,7 @@ export type BarricadeRecord = {
   healthCheckedAt: Date | string | null;
   healthLatencyMs: number | null;
   healthDetail: string | null;
+  healthImage: string | null;
   healthIntervalMinutes: number;
   logoUpdatedAt: Date | string | null;
 };
@@ -98,6 +99,7 @@ interface BarricadeRow extends RowDataPacket {
   health_checked_at: Date | string | null;
   health_latency_ms: number | null;
   health_detail: string | null;
+  health_image: string | null;
   health_interval_minutes: number;
   logo_updated_at: Date | string | null;
 }
@@ -105,6 +107,11 @@ interface BarricadeRow extends RowDataPacket {
 export class BarricadeValidationError extends Error {}
 
 const FALLBACK_KEYS = ["timeout", "conexao", "http_5xx", "cota"] as const;
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/;
+
+export function isBarricadeSlug(slug: string) {
+  return SLUG.test(slug);
+}
 
 export async function listBarricades(day: string) {
   const rows = await query<BarricadeRow[]>(`${SELECT_BARRICADE}`, [day]);
@@ -196,17 +203,24 @@ export async function deleteBarricade(id: number) {
     "SELECT api_id FROM barricades WHERE id = ? LIMIT 1",
     [id],
   );
-  const apiId = rows[0]?.api_id ?? null;
+  const linked = await query<(RowDataPacket & { api_id: number })[]>(
+    "SELECT api_id FROM barricade_sources WHERE barricade_id = ?",
+    [id],
+  );
+  const apiIds = [...new Set([rows[0]?.api_id, ...linked.map((row) => row.api_id)].filter((apiId): apiId is number => Boolean(apiId)))];
   await execute("UPDATE barricades SET fallback_id = NULL WHERE fallback_id = ?", [id]);
   await execute("DELETE FROM barricade_logos WHERE barricade_id = ?", [id]);
   await execute("DELETE FROM barricades WHERE id = ?", [id]);
-  if (!apiId) return;
-  const left = await query<(RowDataPacket & { total: number })[]>(
-    "SELECT COUNT(*) AS total FROM barricades WHERE api_id = ?",
-    [apiId],
-  );
-  if (Number(left[0]?.total ?? 0) === 0) {
-    await execute("DELETE FROM external_apis WHERE id = ?", [apiId]);
+  for (const apiId of apiIds) {
+    const left = await query<(RowDataPacket & { total: number })[]>(
+      `SELECT
+         (SELECT COUNT(*) FROM barricades WHERE api_id = ?) +
+         (SELECT COUNT(*) FROM barricade_sources WHERE api_id = ?) AS total`,
+      [apiId, apiId],
+    );
+    if (Number(left[0]?.total ?? 0) === 0) {
+      await execute("DELETE FROM external_apis WHERE id = ?", [apiId]);
+    }
   }
 }
 
@@ -275,6 +289,7 @@ function mapBarricade(row: BarricadeRow): BarricadeRecord {
     healthCheckedAt: row.health_checked_at,
     healthLatencyMs: row.health_latency_ms == null ? null : Number(row.health_latency_ms),
     healthDetail: row.health_detail,
+    healthImage: row.health_image || null,
     healthIntervalMinutes: Math.min(1440, Math.max(1, Number(row.health_interval_minutes ?? 10) || 10)),
     logoUpdatedAt: row.logo_updated_at ?? null,
   };
@@ -308,7 +323,7 @@ async function normalize(input: BarricadeInput, id: number | null) {
   if (name.length < 2 || name.length > 120) {
     throw new BarricadeValidationError("Informe um nome de 2 a 120 caracteres.");
   }
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*$/.test(slug)) {
+  if (!isBarricadeSlug(slug)) {
     throw new BarricadeValidationError("O identificador usa letras minúsculas, números e barras, como instagram/perfil.");
   }
   if (!isHttpMethod(input.method)) throw new BarricadeValidationError("Método HTTP inválido.");
@@ -333,11 +348,18 @@ async function normalize(input: BarricadeInput, id: number | null) {
     description: input.description.trim().slice(0, 500),
     slug,
     origins,
-    dailyLimit: Math.max(0, Math.min(1_000_000, Math.round(input.dailyLimit))),
+    dailyLimit: clampDaily(input.dailyLimit),
     minuteLimit: Math.max(0, Math.min(10_000, Math.round(input.minuteLimit))),
     fallbackOn,
     responseTemplate: input.responseTemplate.trim(),
   };
+}
+
+function clampDaily(value: number) {
+  if (!Number.isFinite(value)) return 1000;
+  const rounded = Math.round(value);
+  if (rounded < 0) return -1;
+  return Math.min(1_000_000, rounded);
 }
 
 function normalizeOrigins(origins: string[]) {

@@ -124,18 +124,26 @@ export async function updateApi(id: number, input: ApiInput) {
 }
 
 export async function deleteApi(id: number) {
-  const rows = await query<(RowDataPacket & { total: number })[]>(
-    "SELECT COUNT(*) AS total FROM barricades WHERE api_id = ?",
-    [id],
-  );
-  if (Number(rows[0]?.total ?? 0) > 0) {
+  if (await linkedApiCount(id) > 0) {
     throw new ApiValidationError("Remova as barricadas desta API antes de excluí-la.");
   }
   await execute("DELETE FROM external_apis WHERE id = ?", [id]);
 }
 
+async function linkedApiCount(id: number) {
+  const rows = await query<(RowDataPacket & { total: number })[]>(
+    `SELECT
+       (SELECT COUNT(*) FROM barricades WHERE api_id = ?) +
+       (SELECT COUNT(*) FROM barricade_sources WHERE api_id = ?) AS total`,
+    [id, id],
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
 const SELECT_API = `
-  SELECT a.*, (SELECT COUNT(*) FROM barricades b WHERE b.api_id = a.id) AS barricade_count
+  SELECT a.*,
+    (SELECT COUNT(*) FROM barricades b WHERE b.api_id = a.id) +
+    (SELECT COUNT(*) FROM barricade_sources s WHERE s.api_id = a.id) AS barricade_count
   FROM external_apis a
 `;
 

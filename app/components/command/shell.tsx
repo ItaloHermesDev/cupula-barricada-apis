@@ -11,6 +11,7 @@ const ICONS: Record<string, IconName> = {
   painel: "overview",
   apis: "activity",
   barricadas: "monitor",
+  status: "activity",
   historico: "reports",
   usuarios: "users",
 };
@@ -18,7 +19,9 @@ const ICONS: Record<string, IconName> = {
 function titleFor(pathname: string) {
   if (pathname.startsWith("/apis")) return { title: "APIs", crumb: "Cadastro" };
   if (pathname.startsWith("/painel")) return { title: "Painel", crumb: "Desempenho" };
+  if (pathname.includes("/logs")) return { title: "Logs", crumb: "Barricada" };
   if (pathname.startsWith("/barricadas")) return { title: "Barricadas", crumb: "Proteção" };
+  if (pathname.startsWith("/status")) return { title: "Status", crumb: "Verificação" };
   if (pathname.startsWith("/historico")) return { title: "Histórico", crumb: "Monitoramento" };
   if (pathname === "/usuarios") return { title: "Usuários", crumb: "Acesso" };
   if (pathname === "/sem-acesso") return { title: "Sem acesso", crumb: "Conta" };

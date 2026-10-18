@@ -6,11 +6,13 @@ export function Dialog({
   title,
   description,
   onClose,
+  wide,
   children,
 }: {
   title: string;
   description?: string;
   onClose: () => void;
+  wide?: boolean;
   children: ReactNode;
 }) {
   useEffect(() => {
@@ -34,7 +36,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
-        className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-line bg-card p-6 shadow-2xl"
+        className={`relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-line bg-card p-6 shadow-2xl ${wide ? "max-w-3xl" : "max-w-lg"}`}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

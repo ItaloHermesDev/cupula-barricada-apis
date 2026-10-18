@@ -20,10 +20,13 @@ import {
   type CatalogState,
   type FieldPair,
 } from "@/lib/catalog";
-import { requirePage } from "@/lib/dal";
-import { templateFromFields, splitApiUrl, type OpenField } from "@/lib/draft";
-import { inspectApi, previewTemplate, probeUpstream } from "@/lib/gateway";
-import { setRoutine } from "@/lib/health";
+import { requireAnyPage, requirePage } from "@/lib/dal";
+import { distinctOutputError } from "@/lib/combine";
+import { splitApiUrlWithOpen, templateFromFields, type OpenField } from "@/lib/draft";
+import { inspectApi, previewTemplate, probeUpstream, sampleBarricade } from "@/lib/gateway";
+import { checkBarricade, setRoutine } from "@/lib/health";
+import { listBarricadeSources, replaceBarricadeSources, saveRouteQuotas } from "@/lib/sources";
+import { validateResponseTemplate } from "@/lib/transform";
 
 export async function saveApi(_state: CatalogState, formData: FormData): Promise<CatalogState> {
   await requirePage("apis");
@@ -112,13 +115,46 @@ export async function renewToken(_state: CatalogState, formData: FormData): Prom
   return { success: "Token novo salvo. O anterior deixou de valer.", token };
 }
 
+export type BarricadeSampleState = {
+  error?: string;
+  total?: string;
+  apis?: { name: string; status: string; body: string }[];
+};
+
+export async function runBarricadeSample(_state: BarricadeSampleState, formData: FormData): Promise<BarricadeSampleState> {
+  await requireAnyPage("status", "barricadas");
+  const id = numberOrNull(formData.get("id"));
+  if (!id) return { error: "Barricada não encontrada." };
+  const query: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (typeof value !== "string" || !key.startsWith("param_")) continue;
+    const name = key.slice(6).trim();
+    if (!name) continue;
+    query[name] = value.trim();
+  }
+  try {
+    return await sampleBarricade(id, query);
+  } catch (error) {
+    console.error("Falha ao testar a barricada", error instanceof Error ? error.message : "erro");
+    return { error: "Não foi possível chamar a barricada." };
+  }
+}
+
 export async function toggleRoutine(formData: FormData) {
-  await requirePage("barricadas");
+  await requireAnyPage("status", "barricadas");
   const id = numberOrNull(formData.get("id"));
   if (!id) return;
+  if (formData.get("now") === "1") {
+    await checkBarricade(id, { force: true });
+    revalidatePath("/barricadas");
+    revalidatePath("/status");
+    revalidatePath(`/barricadas/${id}`);
+    return;
+  }
   const interval = Number(formData.get("interval"));
   await setRoutine(id, formData.get("enabled") === "1", Number.isFinite(interval) ? interval : 10);
   revalidatePath("/barricadas");
+  revalidatePath("/status");
   revalidatePath(`/barricadas/${id}`);
 }
 
@@ -132,6 +168,7 @@ export async function removeBarricade(formData: FormData) {
 
 export async function saveSimpleBarricade(_state: CatalogState, formData: FormData): Promise<CatalogState> {
   await requirePage("barricadas");
+  const createdIds: number[] = [];
   try {
     const draft = await readDraft(formData);
     const logo = await readLogo(formData);
@@ -142,31 +179,77 @@ export async function saveSimpleBarricade(_state: CatalogState, formData: FormDa
       if (!updated) return { error: "Barricada não encontrada." };
     } else {
       apiId = await createApi(draft.api);
+      createdIds.push(apiId);
+    }
+    const sourceIds: number[] = [];
+    for (const source of draft.sources) {
+      if (source.apiId) {
+        const updated = await updateApi(source.apiId, source.api);
+        if (!updated) throw new ApiValidationError("Uma API combinada não foi encontrada.");
+        sourceIds.push(source.apiId);
+      } else {
+        const id = await createApi(source.api);
+        createdIds.push(id);
+        sourceIds.push(id);
+      }
     }
     const input = { ...draft.barricade, apiId };
+    let savedId = barricadeId;
+    let token: string | undefined;
     if (barricadeId) {
       const updated = await updateBarricade(barricadeId, input);
-      if (!updated) return { error: "Barricada não encontrada." };
-      await applyLogo(barricadeId, logo);
-      revalidatePath("/barricadas");
-      revalidatePath(`/barricadas/${barricadeId}`);
-      revalidatePath(`/barricadas/${barricadeId}/editar`);
-      return { success: "Barricada atualizada." };
-    }
-    try {
+      if (!updated) throw new BarricadeValidationError("Barricada não encontrada.");
+    } else {
       const created = await createBarricade(input, draft.token);
-      await applyLogo(created.id, logo);
-      revalidatePath("/barricadas");
+      savedId = created.id;
+      token = created.token;
+    }
+    if (!savedId || !apiId) throw new BarricadeValidationError("Barricada não encontrada.");
+    const previous = barricadeId ? await listBarricadeSources(barricadeId) : [];
+    await replaceBarricadeSources(
+      savedId,
+      sourceIds.map((id, position) => ({
+        apiId: id,
+        responseTemplate: draft.sources[position]?.responseTemplate ?? "",
+      })),
+    );
+    await saveRouteQuotas(savedId, [
+      { apiId, monthlyTokens: draft.monthlyTokens, requestsPerMinute: draft.requestsPerMinute },
+      ...sourceIds.map((id, position) => ({
+        apiId: id,
+        monthlyTokens: draft.sources[position]?.monthlyTokens ?? null,
+        requestsPerMinute: draft.sources[position]?.requestsPerMinute ?? null,
+      })),
+    ]);
+    const keep = new Set([apiId, ...sourceIds]);
+    for (const old of previous) {
+      if (keep.has(old.apiId)) continue;
+      try {
+        await deleteApi(old.apiId);
+      } catch {
+        // A API continua ligada a outra barricada.
+      }
+    }
+    await applyLogo(savedId, logo);
+    revalidatePath("/barricadas");
+    revalidatePath(`/barricadas/${savedId}`);
+    revalidatePath(`/barricadas/${savedId}/editar`);
+    if (!barricadeId) {
       return {
         success: "Barricada criada. O token fica salvo em Ver.",
-        token: created.token,
-        createdId: created.id,
+        token,
+        createdId: savedId,
       };
-    } catch (error) {
-      await deleteApi(apiId);
-      throw error;
     }
+    return { success: "Barricada atualizada." };
   } catch (error) {
+    for (const id of createdIds) {
+      try {
+        await deleteApi(id);
+      } catch {
+        // A API já ficou ligada à barricada.
+      }
+    }
     if (isDuplicate(error)) return { error: "Já existe uma barricada com esse endereço." };
     if (error instanceof ApiValidationError || error instanceof BarricadeValidationError) return { error: error.message };
     console.error("Falha ao salvar barricada", error);
@@ -177,13 +260,21 @@ export async function saveSimpleBarricade(_state: CatalogState, formData: FormDa
 export async function pingSimpleBarricade(_state: CatalogState, formData: FormData): Promise<CatalogState> {
   await requirePage("barricadas");
   try {
-    const draft = await readDraft(formData);
+    const marker = String(formData.get("ping_source") ?? "");
+    if (marker && !/^\d+$/.test(marker)) return { error: "Não foi possível chamar a API." };
+    const name = String(formData.get("name") ?? "").trim() || "API";
+    const block = await readApiBlock(
+      formData,
+      marker ? `s${marker}_` : "",
+      marker ? combinedName(name, Number(marker)) : name,
+      "",
+    );
     const preview = await probeUpstream({
-      url: draft.url,
-      method: draft.api.method,
-      headers: draft.api.headers,
-      contentType: draft.api.requestContentType,
-      bodyTemplate: draft.api.bodyTemplate,
+      url: block.url,
+      method: block.api.method,
+      headers: block.api.headers,
+      contentType: block.api.requestContentType,
+      bodyTemplate: block.api.bodyTemplate,
     });
     if (!preview.responseBody) {
       return { error: "A API não devolveu conteúdo.", preview };
@@ -198,37 +289,102 @@ export async function pingSimpleBarricade(_state: CatalogState, formData: FormDa
 
 async function readDraft(formData: FormData) {
   const name = String(formData.get("name") ?? "");
-  const url = String(formData.get("api_url") ?? "").trim();
-  const method = String(formData.get("api_method") ?? "POST");
+  const description = String(formData.get("description") ?? "").trim();
+  const primary = await readApiBlock(formData, "", name, description);
+  const sources = await readSourceBlocks(formData, name, description);
+  if (sources.some((source) => source.apiId && source.apiId === primary.apiId)) {
+    throw new BarricadeValidationError("A API combinada precisa ser outra URL.");
+  }
+  const clash = distinctOutputError([primary.responseTemplate, ...sources.map((source) => source.responseTemplate)]);
+  if (clash) throw new BarricadeValidationError(clash);
+  return {
+    url: primary.url,
+    token: String(formData.get("token") ?? ""),
+    api: primary.api,
+    monthlyTokens: primary.monthlyTokens,
+    requestsPerMinute: primary.requestsPerMinute,
+    sources,
+    barricade: {
+      apiId: 0,
+      name,
+      description,
+      slug: String(formData.get("slug") ?? ""),
+      method: "GET" as const,
+      origins: String(formData.get("origins") ?? "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+      dailyLimit: Number(formData.get("daily_limit") ?? 1000),
+      minuteLimit: 0,
+      params: uniqueParams([
+        ...placeholderNames(`${primary.endpointPath}\n${primary.api.bodyTemplate}`),
+        ...sources.flatMap((source) => placeholderNames(`${source.endpointPath}\n${source.api.bodyTemplate}`)),
+      ]),
+      allowedHeaders: [] as string[],
+      responseTemplate: primary.responseTemplate,
+      active: formData.get("active") === "1",
+      fallbackId: numberOrNull(formData.get("fallback_id")),
+      fallbackOn: ["timeout", "conexao", "http_5xx", "cota"],
+      idempotent: true,
+    },
+  };
+}
+
+async function readSourceBlocks(formData: FormData, name: string, description: string) {
+  const indexes = formData.getAll("source_index").map(String);
+  if (indexes.length > 5) throw new BarricadeValidationError("Uma barricada combina no máximo 5 APIs além da primeira.");
+  const sources = [];
+  for (const [position, index] of indexes.entries()) {
+    if (!/^\d+$/.test(index)) throw new BarricadeValidationError("Não foi possível ler as APIs combinadas.");
+    sources.push(await readApiBlock(formData, `s${index}_`, combinedName(name, position), description));
+  }
+  return sources;
+}
+
+async function readApiBlock(formData: FormData, prefix: string, apiName: string, description: string) {
+  const field = (name: string) => `${prefix}${name}`;
+  const url = String(formData.get(field("api_url")) ?? "").trim();
+  const method = String(formData.get(field("api_method")) ?? "POST");
   if (!isHttpMethod(method)) throw new ApiValidationError("Método HTTP inválido.");
+  const openQuery = formData.getAll(field("query_open_name")).map(String).map((item) => item.trim()).filter(Boolean);
   let parts: { baseUrl: string; endpointPath: string };
   try {
-    parts = splitApiUrl(url);
-  } catch {
+    parts = splitApiUrlWithOpen(url, openQuery);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.startsWith("O nome") || message.startsWith("O valor")) throw new ApiValidationError(message);
     throw new ApiValidationError("Informe a URL completa da API, começando com https://.");
   }
   if (parts.baseUrl === "https:" || url.length < 12) {
     throw new ApiValidationError("Informe a URL completa da API, começando com https://.");
   }
-  const mode = String(formData.get("body_mode") ?? "none");
-  const existing = await getApi(numberOrNull(formData.get("api_id")) ?? 0);
-  const headers = mergeHeaders(formData, existing?.headers ?? []);
-  const fields = readOpenFields(formData);
+  const mode = String(formData.get(field("body_mode")) ?? "none");
+  const apiId = numberOrNull(formData.get(field("api_id")));
+  const existing = await getApi(apiId ?? 0);
+  const headers = mergeHeaders(formData, existing?.headers ?? [], prefix);
+  const fields = readOpenFields(formData, prefix);
   let bodyTemplate = "";
   let requestContentType = "application/json";
   if (mode === "form") {
     bodyTemplate = templateFromFields(fields);
     requestContentType = "multipart/form-data";
   } else if (mode === "json") {
-    bodyTemplate = String(formData.get("json_body") ?? "").trim();
+    bodyTemplate = String(formData.get(field("json_body")) ?? "").trim();
     requestContentType = "application/json";
   }
+  const responseTemplate = String(formData.get(field("response_template")) ?? "").trim();
+  const templateError = validateResponseTemplate(responseTemplate);
+  if (templateError) throw new BarricadeValidationError(templateError);
   return {
+    apiId,
+    monthlyTokens: readQuota(formData, field("monthly_tokens")),
+    requestsPerMinute: readQuota(formData, field("requests_per_minute")),
     url,
-    token: String(formData.get("token") ?? ""),
+    endpointPath: parts.endpointPath,
+    responseTemplate,
     api: {
-      name,
-      description: "",
+      name: apiName,
+      description,
       baseUrl: parts.baseUrl,
       endpointPath: parts.endpointPath,
       method,
@@ -245,27 +401,22 @@ async function readDraft(formData: FormData) {
       timeoutMs: 15000,
       active: true,
     },
-    barricade: {
-      apiId: 0,
-      name,
-      description: "",
-      slug: String(formData.get("slug") ?? ""),
-      method: "GET" as const,
-      origins: String(formData.get("origins") ?? "")
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean),
-      dailyLimit: Number(formData.get("daily_limit") ?? 1000),
-      minuteLimit: 0,
-      params: fields.filter((field) => field.open).map((field) => ({ name: field.name, required: false })),
-      allowedHeaders: [] as string[],
-      responseTemplate: String(formData.get("response_template") ?? ""),
-      active: formData.get("active") === "1",
-      fallbackId: numberOrNull(formData.get("fallback_id")),
-      fallbackOn: ["timeout", "conexao", "http_5xx", "cota"],
-      idempotent: true,
-    },
   };
+}
+
+function readQuota(formData: FormData, name: string) {
+  const raw = String(formData.get(name) ?? "").trim();
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > 1_000_000_000) {
+    throw new BarricadeValidationError("Informe um número a partir de zero, ou deixe o campo em branco.");
+  }
+  return value;
+}
+
+function combinedName(name: string, index: number) {
+  const suffix = ` · ${index + 2}`;
+  return `${name.trim().slice(0, Math.max(2, 120 - suffix.length))}${suffix}`;
 }
 
 const LOGO_LIMIT = 400 * 1024;
@@ -300,10 +451,10 @@ function imageMime(bytes: Buffer) {
   return null;
 }
 
-function mergeHeaders(formData: FormData, previous: FieldPair[]) {
-  const names = formData.getAll("header_key").map(String);
-  const values = formData.getAll("header_value").map(String);
-  const keep = formData.getAll("header_keep").map(String);
+function mergeHeaders(formData: FormData, previous: FieldPair[], prefix = "") {
+  const names = formData.getAll(`${prefix}header_key`).map(String);
+  const values = formData.getAll(`${prefix}header_value`).map(String);
+  const keep = formData.getAll(`${prefix}header_keep`).map(String);
   return names
     .map((name, index) => {
       const trimmed = name.trim();
@@ -320,10 +471,25 @@ function mergeHeaders(formData: FormData, previous: FieldPair[]) {
     .slice(0, 40);
 }
 
-function readOpenFields(formData: FormData): OpenField[] {
-  const names = formData.getAll("field_key").map(String);
-  const values = formData.getAll("field_value").map(String);
-  const open = formData.getAll("field_open").map(String);
+function placeholderNames(text: string) {
+  return [...text.matchAll(/\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
+}
+
+function uniqueParams(names: string[]) {
+  const seen = new Set<string>();
+  const params: { name: string; required: boolean }[] = [];
+  for (const name of names) {
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    params.push({ name, required: false });
+  }
+  return params;
+}
+
+function readOpenFields(formData: FormData, prefix = ""): OpenField[] {
+  const names = formData.getAll(`${prefix}field_key`).map(String);
+  const values = formData.getAll(`${prefix}field_value`).map(String);
+  const open = formData.getAll(`${prefix}field_open`).map(String);
   const fields = names
     .map((name, index) => ({ name: name.trim(), value: (values[index] ?? "").trim(), open: open[index] === "1" }))
     .filter((field) => field.name.length > 0)
