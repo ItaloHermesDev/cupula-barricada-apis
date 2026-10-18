@@ -69,7 +69,7 @@ export function callParameters(input: {
   function scan(text: string) {
     QUERY_PLACEHOLDER.lastIndex = 0;
     for (const match of text.matchAll(QUERY_PLACEHOLDER)) {
-      add({ name: match[1], value: (match[2] ?? "").trim(), required: false });
+      add({ name: match[1], value: (match[2] ?? "").trim(), required: true });
     }
   }
 
@@ -86,8 +86,8 @@ export function callParameters(input: {
     }
     for (const param of input.params) {
       const current = found.get(param.name);
-      if (current) current.required = current.required || param.required;
-      else add({ name: param.name, value: "", required: param.required });
+      if (current) current.required = true;
+      else add({ name: param.name, value: "", required: true });
     }
   }
 

@@ -191,7 +191,7 @@ export async function sampleBarricade(id: number, query: Record<string, string>)
   if (allowed.size > 0 && Object.keys(query).some((key) => !allowed.has(key))) {
     return { error: "A chamada enviou um parâmetro que esta barricada não aceita." };
   }
-  const missing = barricade.params.find((param) => param.required && !query[param.name]);
+  const missing = barricade.params.find((param) => !query[param.name]?.trim());
   if (missing) return { error: "Faltam parâmetros obrigatórios." };
   const consumer: ConsumerContext = { query, header: {}, body: {}, path: { ...query } };
   const primary = await getApi(barricade.apiId);

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { runBarricadeSample, toggleRoutine, type BarricadeSampleState } from "@/app/actions/catalog";
+import { BarricadeMark } from "@/app/components/catalog/barricade-mark";
 import { fieldClass } from "@/app/components/catalog/fields";
 import { Dialog } from "@/app/components/dialog";
 
@@ -13,6 +14,7 @@ export type BarricadeOpsRow = {
   statusTone: "muted" | "success" | "warning" | "danger";
   healthEnabled: boolean;
   interval: number;
+  logoVersion: string | null;
   fields: { name: string; value: string; required: boolean }[];
 };
 
@@ -34,6 +36,13 @@ export function BarricadeOps({ rows }: { rows: BarricadeOpsRow[] }) {
       <ul className="flex flex-col gap-2">
         {rows.map((row) => (
           <li key={row.id} className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line bg-card/90 px-4 py-3">
+            {row.logoVersion ? (
+              <BarricadeMark id={row.id} updatedAt={row.logoVersion} />
+            ) : (
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-line bg-background text-sm font-medium text-muted">
+                {row.name.slice(0, 1).toUpperCase()}
+              </span>
+            )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-foreground">{row.name}</p>
               <p className={`text-xs ${toneClass[row.statusTone]}`}>{row.statusLabel}</p>
@@ -178,8 +187,8 @@ function SampleForm({ row }: { row: BarricadeOpsRow }) {
           {row.fields.map((field) => (
             <label key={field.name} className="text-sm text-foreground">
               {field.name}
-              {field.required ? " *" : ""}
-              <input name={`param_${field.name}`} defaultValue={field.value} required={field.required} className={fieldClass} />
+              {" *"}
+              <input name={`param_${field.name}`} defaultValue={field.value} required className={fieldClass} />
             </label>
           ))}
         </div>

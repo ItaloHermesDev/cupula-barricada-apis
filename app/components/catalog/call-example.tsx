@@ -120,8 +120,8 @@ function buildPrompt({
       "Chamada com parâmetros na URL.",
       "Envie os parâmetros na query string da URL, no formato nome=valor.",
       "Troque {nome} pelo valor da chamada.",
-      "Padrão preenchido é o valor usado quando a chamada omite o parâmetro. Padrão nenhum significa que a omissão segue sem esse parâmetro.",
-      "Obrigatório sim exige o parâmetro na URL. Sem ele, a barricada recusa a chamada.",
+      "Todos os parâmetros são obrigatórios. Sem algum deles, a barricada recusa a chamada.",
+      "Padrão preenchido é um exemplo do valor. A chamada ainda precisa enviar o parâmetro.",
     );
     for (const field of fields) {
       const fallback = field.value ? field.value : "nenhum";

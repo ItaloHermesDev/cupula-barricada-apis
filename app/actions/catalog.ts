@@ -481,7 +481,7 @@ function uniqueParams(names: string[]) {
   for (const name of names) {
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    params.push({ name, required: false });
+    params.push({ name, required: true });
   }
   return params;
 }

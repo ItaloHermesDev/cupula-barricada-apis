@@ -60,6 +60,7 @@ async function opsOf(item: BarricadeRecord): Promise<BarricadeOpsRow> {
     statusTone: status.tone,
     healthEnabled: item.healthEnabled,
     interval: item.healthIntervalMinutes,
+    logoVersion: logoVersionOf(item.logoUpdatedAt),
     fields: mergeFields(groups),
   };
 }
@@ -76,6 +77,12 @@ function mergeFields(groups: CallParameter[][]) {
     if (!current.value && field.value) current.value = field.value;
   }
   return [...found.values()];
+}
+
+function logoVersionOf(value: Date | string | null) {
+  if (!value) return null;
+  const stamp = value instanceof Date ? String(value.getTime()) : String(value);
+  return stamp || null;
 }
 
 function statusOf(item: BarricadeRecord) {
