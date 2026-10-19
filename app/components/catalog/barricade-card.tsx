@@ -16,6 +16,7 @@ export type BarricadeCardData = {
   logoVersion: string | null;
   statusLabel: string;
   statusTone: "muted" | "success" | "warning" | "danger";
+  fallbackName: string | null;
 };
 
 export function BarricadeCard({ item }: { item: BarricadeCardData }) {
@@ -115,6 +116,11 @@ export function BarricadeCard({ item }: { item: BarricadeCardData }) {
           <StackIcon />
           <span>{item.usedLabel} hoje · {item.checksLabel}</span>
         </div>
+        {item.fallbackName ? (
+          <div className="api-card__stat">
+            <span>Reserva: {item.fallbackName}</span>
+          </div>
+        ) : null}
         <div className="api-card__stat">
           <span className={`api-status api-status--${item.statusTone}`} />
           <span>{item.statusLabel}</span>

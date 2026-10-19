@@ -24,8 +24,9 @@ async function Status() {
   await requirePage("status");
   const day = dayKey();
   await refreshDueHealth(await listBarricades(day));
-  const items = await listBarricades(day);
-  const rows = await Promise.all(items.map(opsOf));
+  const items = (await listBarricades(day)).sort(byName);
+  const names = new Map(items.map((item) => [item.id, item.name]));
+  const rows = await Promise.all(items.map((item) => opsOf(item, item.fallbackId ? names.get(item.fallbackId) ?? null : null)));
 
   return (
     <div className="relative flex flex-col gap-4">
@@ -41,7 +42,11 @@ async function Status() {
   );
 }
 
-async function opsOf(item: BarricadeRecord): Promise<BarricadeOpsRow> {
+function byName(left: { name: string }, right: { name: string }) {
+  return left.name.localeCompare(right.name, "pt", { sensitivity: "base" });
+}
+
+async function opsOf(item: BarricadeRecord, fallbackName: string | null): Promise<BarricadeOpsRow> {
   const status = statusOf(item);
   const api = await getApi(item.apiId);
   const linked = await listBarricadeSources(item.id);
@@ -61,6 +66,7 @@ async function opsOf(item: BarricadeRecord): Promise<BarricadeOpsRow> {
     healthEnabled: item.healthEnabled,
     interval: item.healthIntervalMinutes,
     logoVersion: logoVersionOf(item.logoUpdatedAt),
+    fallbackName,
     fields: mergeFields(groups),
   };
 }

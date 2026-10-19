@@ -22,7 +22,8 @@ async function Barricades() {
   await requirePage("barricadas");
   const day = dayKey();
   await refreshDueHealth(await listBarricades(day));
-  const items = await listBarricades(day);
+  const items = (await listBarricades(day)).sort(byName);
+  const names = new Map(items.map((item) => [item.id, item.name]));
 
   return (
     <div className="relative flex flex-col gap-4">
@@ -41,7 +42,7 @@ async function Barricades() {
       ) : (
         <div className="relative flex flex-wrap gap-5">
           {items.map((item) => (
-            <BarricadeCard key={item.id} item={cardOf(item)} />
+            <BarricadeCard key={item.id} item={cardOf(item, item.fallbackId ? names.get(item.fallbackId) ?? null : null)} />
           ))}
         </div>
       )}
@@ -49,7 +50,11 @@ async function Barricades() {
   );
 }
 
-function cardOf(item: BarricadeRecord): BarricadeCardData {
+function byName(left: { name: string }, right: { name: string }) {
+  return left.name.localeCompare(right.name, "pt", { sensitivity: "base" });
+}
+
+function cardOf(item: BarricadeRecord, fallbackName: string | null): BarricadeCardData {
   const status = statusOf(item);
   const used = item.dailyLimit > 0 ? `${item.usedToday} / ${item.dailyLimit}` : `${item.usedToday} · sem limite`;
   const stamp = item.logoUpdatedAt instanceof Date ? String(item.logoUpdatedAt.getTime()) : item.logoUpdatedAt;
@@ -64,6 +69,7 @@ function cardOf(item: BarricadeRecord): BarricadeCardData {
     logoVersion: stamp ? String(stamp) : null,
     statusLabel: status.label,
     statusTone: status.tone,
+    fallbackName,
   };
 }
 

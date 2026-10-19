@@ -15,6 +15,7 @@ export type BarricadeOpsRow = {
   healthEnabled: boolean;
   interval: number;
   logoVersion: string | null;
+  fallbackName: string | null;
   fields: { name: string; value: string; required: boolean }[];
 };
 
@@ -46,6 +47,7 @@ export function BarricadeOps({ rows }: { rows: BarricadeOpsRow[] }) {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-foreground">{row.name}</p>
               <p className={`text-xs ${toneClass[row.statusTone]}`}>{row.statusLabel}</p>
+              {row.fallbackName ? <p className="truncate text-xs text-muted">Reserva: {row.fallbackName}</p> : null}
             </div>
             <form action={toggleRoutine}>
               <input type="hidden" name="id" value={row.id} />
