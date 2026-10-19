@@ -1,3 +1,5 @@
+import { restoreTemplates } from "@/lib/draft";
+
 export type ConsumerContext = {
   query: Record<string, string>;
   header: Record<string, string>;
@@ -100,7 +102,7 @@ const CONTROL = /[\u0000-\u001F\u007F]/;
 
 export function fillUrlPath(template: string, consumer: ConsumerContext) {
   let safe = true;
-  const path = template.replace(/\{\{\s*([^|}]+?)\s*(?:\|\s*([^}]*))?\s*\}\}/g, (_match, key: string, fallback?: string) => {
+  const path = restoreTemplates(template).replace(/\{\{\s*([^|}]+?)\s*(?:\|\s*([^}]*))?\s*\}\}/g, (_match, key: string, fallback?: string) => {
     const value = resolve(key, fallback, {}, consumer);
     const text = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
     if (CONTROL.test(text)) {

@@ -4,6 +4,8 @@ export type OpenField = {
   name: string;
   value: string;
   open: boolean;
+  path?: boolean;
+  index?: number;
 };
 
 export type Leaf = {
@@ -36,6 +38,18 @@ export type InstructionField = {
 };
 
 const QUERY_FIELD = /^\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)\s*(?:\|\s*([^}]*))?\s*\}\}$/;
+const ENCODED_TEMPLATE = /%7B%7B([\s\S]*?)%7D%7D/gi;
+
+export function restoreTemplates(value: string) {
+  ENCODED_TEMPLATE.lastIndex = 0;
+  return value.replace(ENCODED_TEMPLATE, (_match, inner: string) => {
+    try {
+      return `{{${decodeURIComponent(inner)}}}`;
+    } catch {
+      return `{{${inner}}}`;
+    }
+  });
+}
 const QUERY_PLACEHOLDER = /\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)\s*(?:\|\s*([^}]*))?\s*\}\}/g;
 const SECRET_QUERY = /authorization|api[-_]?key|token|secret|password|cookie/i;
 
@@ -73,8 +87,9 @@ export function callParameters(input: {
     }
   }
 
-  scan(input.endpointPath.split("?")[0] ?? "");
-  for (const pair of endpointQuery(input.endpointPath)) scan(pair.value);
+  const endpointPath = restoreTemplates(input.endpointPath);
+  scan(endpointPath.split("?")[0] ?? "");
+  for (const pair of endpointQuery(endpointPath)) scan(pair.value);
   for (const pair of input.query) scan(pair.value);
   for (const pair of input.pathParams) scan(pair.value);
   scan(input.bodyTemplate);
@@ -108,27 +123,67 @@ export function queryChoices(rawUrl: string, previous: OpenField[] = []) {
   });
 }
 
+export function pathChoices(rawUrl: string, previous: OpenField[] = []) {
+  try {
+    return pathFieldsFrom(new URL(rawUrl.trim()).pathname, previous);
+  } catch {
+    return previous.filter((item) => item.path);
+  }
+}
+
+function pathFieldsFrom(pathname: string, previous: OpenField[] = []) {
+  const previousPath = previous.filter((item) => item.path);
+  return pathname.split("/").flatMap((segment, index): OpenField[] => {
+    const text = restoreTemplates(safeDecode(segment));
+    if (!text) return [];
+    const saved = text.match(QUERY_FIELD);
+    if (saved) return [{ name: saved[1], value: (saved[2] ?? "").trim(), open: true, path: true, index }];
+    const prior = previousPath.find((item) => item.index === index && item.value === text)
+      ?? previousPath.find((item) => item.value === text && item.open);
+    return [{ name: prior?.name ?? "", value: text, open: prior?.open ?? false, path: true, index }];
+  });
+}
+
 export function presentApiTarget(baseUrl: string, endpointPath: string) {
-  const path = endpointPath.split("?")[0] ?? "";
-  const queryFields = endpointQuery(endpointPath).flatMap((pair): OpenField[] => {
+  const restored = restoreTemplates(endpointPath);
+  const rawPath = restored.split("?")[0] ?? "";
+  const pathFields = pathFieldsFrom(rawPath);
+  const path = rawPath.split("/").map((segment, index) => pathFields.find((item) => item.index === index)?.value ?? segment).join("/");
+  const queryFields = endpointQuery(restored).flatMap((pair): OpenField[] => {
     if (SECRET_QUERY.test(pair.name)) return [];
     const saved = pair.value.match(QUERY_FIELD);
     if (saved) return [{ name: pair.name, value: (saved[2] ?? "").trim(), open: true }];
     return [{ name: pair.name, value: pair.value, open: false }];
   });
   const search = new URLSearchParams();
-  for (const pair of endpointQuery(endpointPath)) {
+  for (const pair of endpointQuery(restored)) {
     const field = queryFields.find((item) => item.name === pair.name);
     search.append(pair.name, field ? field.value : pair.value);
   }
   const query = search.toString();
   const base = baseUrl.replace(/\/$/, "");
-  return { apiUrl: `${base}${path}${query ? `?${query}` : ""}`, queryFields };
+  return { apiUrl: `${base}${path}${query ? `?${query}` : ""}`, queryFields: [...pathFields, ...queryFields] };
 }
 
-export function splitApiUrlWithOpen(raw: string, openNames: string[]) {
+export function splitApiUrlWithOpen(raw: string, openNames: string[], pathSlots: { index: number; name: string; value: string }[] = []) {
   const url = new URL(raw.trim());
   const open = new Set(openNames);
+  const segments = url.pathname.split("/").map((segment) => restoreTemplates(safeDecode(segment)));
+  for (const slot of pathSlots) {
+    const name = slot.name.trim();
+    if (!name) throw new Error("Dê um nome ao pedaço do caminho que quem chama informa. Exemplo: ip.");
+    if (SECRET_QUERY.test(name)) throw new Error("Esse nome fica só no servidor. Escolha outro, como ip.");
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("O nome do parâmetro usa letras, números, _ ou -.");
+    if (/[{}|]/.test(slot.value)) throw new Error("O valor padrão do parâmetro não pode conter {, } ou |.");
+    const template = `{{consumer.query.${name}|${slot.value}}}`;
+    let index = slot.index;
+    const current = segments[index];
+    if (current !== slot.value && current !== template) {
+      index = segments.findIndex((segment) => segment === slot.value || segment === template);
+    }
+    if (index < 0) continue;
+    segments[index] = template;
+  }
   const parts: string[] = [];
   for (const [name, value] of url.searchParams) {
     if (open.has(name) && !SECRET_QUERY.test(name)) {
@@ -139,7 +194,15 @@ export function splitApiUrlWithOpen(raw: string, openNames: string[]) {
     }
     parts.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
   }
-  return { baseUrl: url.origin, endpointPath: `${url.pathname}${parts.length ? `?${parts.join("&")}` : ""}` };
+  return { baseUrl: url.origin, endpointPath: `${segments.join("/")}${parts.length ? `?${parts.join("&")}` : ""}` };
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function endpointQuery(endpointPath: string) {

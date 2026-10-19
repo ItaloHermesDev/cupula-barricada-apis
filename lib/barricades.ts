@@ -4,6 +4,7 @@ import { isIP } from "net";
 import { execute, query } from "@/lib/db";
 import { getApi, joinUrl } from "@/lib/apis";
 import { decryptSecret, encryptSecret, generateToken, hashToken, tokenMatches } from "@/lib/secrets";
+import { type ErrorRule, parseStoredRules } from "@/lib/error-rules";
 import { validateResponseTemplate } from "@/lib/transform";
 import {
   isHttpMethod,
@@ -29,6 +30,7 @@ export type BarricadeRecord = {
   params: AcceptedParam[];
   allowedHeaders: string[];
   responseTemplate: string;
+  errorRules: ErrorRule[];
   active: boolean;
   fallbackId: number | null;
   fallbackOn: string[];
@@ -60,6 +62,7 @@ export type BarricadeInput = {
   params: AcceptedParam[];
   allowedHeaders: string[];
   responseTemplate: string;
+  errorRules: ErrorRule[];
   active: boolean;
   fallbackId: number | null;
   fallbackOn: string[];
@@ -85,6 +88,7 @@ interface BarricadeRow extends RowDataPacket {
   params_json: string;
   headers_json: string;
   response_template: string | null;
+  error_rules_json: string | null;
   active: number;
   fallback_id: number | null;
   fallback_on: string;
@@ -137,8 +141,8 @@ export async function createBarricade(input: BarricadeInput, token?: string) {
   const result = await execute(
     `INSERT INTO barricades (
       api_id, name, description, slug, method, token_hash, token_prefix, token_cipher, origins_json, daily_limit,
-      minute_limit, params_json, headers_json, response_template, active, fallback_id, fallback_on, idempotent
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      minute_limit, params_json, headers_json, response_template, active, fallback_id, fallback_on, idempotent, error_rules_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [...sharedParams(normalized), issued.hash, issued.prefix, issued.cipher, ...tailParams(normalized)],
   );
   return { id: Number(result.insertId), token: issued.token };
@@ -150,7 +154,7 @@ export async function updateBarricade(id: number, input: BarricadeInput) {
     `UPDATE barricades SET
       api_id = ?, name = ?, description = ?, slug = ?, method = ?, origins_json = ?, daily_limit = ?,
       minute_limit = ?, params_json = ?, headers_json = ?, response_template = ?, active = ?, fallback_id = ?,
-      fallback_on = ?, idempotent = ?, config_version = config_version + 1
+      fallback_on = ?, idempotent = ?, error_rules_json = ?, config_version = config_version + 1
      WHERE id = ?`,
     [
       normalized.apiId,
@@ -168,6 +172,7 @@ export async function updateBarricade(id: number, input: BarricadeInput) {
       normalized.fallbackId,
       normalized.fallbackOn.join(","),
       normalized.idempotent ? 1 : 0,
+      JSON.stringify(normalized.errorRules),
       id,
     ],
   );
@@ -275,6 +280,7 @@ function mapBarricade(row: BarricadeRow): BarricadeRecord {
     params: readParams(row.params_json),
     allowedHeaders: readStrings(row.headers_json),
     responseTemplate: row.response_template ?? "",
+    errorRules: parseStoredRules(row.error_rules_json),
     active: row.active === 1,
     fallbackId: row.fallback_id,
     fallbackOn: row.fallback_on.split(",").filter(Boolean),
@@ -413,6 +419,7 @@ function tailParams(input: Awaited<ReturnType<typeof normalize>>) {
     input.fallbackId,
     input.fallbackOn.join(","),
     input.idempotent ? 1 : 0,
+    JSON.stringify(input.errorRules),
   ];
 }
 

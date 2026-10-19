@@ -22,9 +22,10 @@ import {
 } from "@/lib/catalog";
 import { requireAnyPage, requirePage } from "@/lib/dal";
 import { distinctOutputError } from "@/lib/combine";
-import { splitApiUrlWithOpen, templateFromFields, type OpenField } from "@/lib/draft";
+import { restoreTemplates, splitApiUrlWithOpen, templateFromFields, type OpenField } from "@/lib/draft";
 import { inspectApi, previewTemplate, probeUpstream, sampleBarricade } from "@/lib/gateway";
 import { checkBarricade, setRoutine } from "@/lib/health";
+import { rulesFromForm } from "@/lib/error-rules";
 import { listBarricadeSources, replaceBarricadeSources, saveRouteQuotas } from "@/lib/sources";
 import { validateResponseTemplate } from "@/lib/transform";
 
@@ -211,6 +212,7 @@ export async function saveSimpleBarricade(_state: CatalogState, formData: FormDa
       sourceIds.map((id, position) => ({
         apiId: id,
         responseTemplate: draft.sources[position]?.responseTemplate ?? "",
+        errorRules: draft.sources[position]?.errorRules ?? [],
       })),
     );
     await saveRouteQuotas(savedId, [
@@ -297,6 +299,10 @@ async function readDraft(formData: FormData) {
   }
   const clash = distinctOutputError([primary.responseTemplate, ...sources.map((source) => source.responseTemplate)]);
   if (clash) throw new BarricadeValidationError(clash);
+  const rules = [primary.errorRules, ...sources.map((source) => source.errorRules)].flat();
+  if (rules.some((rule) => rule.action === "fallback") && !numberOrNull(formData.get("fallback_id"))) {
+    throw new BarricadeValidationError("Escolha a barricada reserva em “Se falhar, usar” para poder ativá-la num erro.");
+  }
   return {
     url: primary.url,
     token: String(formData.get("token") ?? ""),
@@ -322,6 +328,7 @@ async function readDraft(formData: FormData) {
       ]),
       allowedHeaders: [] as string[],
       responseTemplate: primary.responseTemplate,
+      errorRules: primary.errorRules,
       active: formData.get("active") === "1",
       fallbackId: numberOrNull(formData.get("fallback_id")),
       fallbackOn: ["timeout", "conexao", "http_5xx", "cota"],
@@ -347,12 +354,21 @@ async function readApiBlock(formData: FormData, prefix: string, apiName: string,
   const method = String(formData.get(field("api_method")) ?? "POST");
   if (!isHttpMethod(method)) throw new ApiValidationError("Método HTTP inválido.");
   const openQuery = formData.getAll(field("query_open_name")).map(String).map((item) => item.trim()).filter(Boolean);
+  const pathSlots = formData.getAll(field("path_slot")).map(String).flatMap((item) => {
+    const bar = item.indexOf("|");
+    if (bar <= 0) return [];
+    const index = Number(item.slice(0, bar));
+    const rest = item.slice(bar + 1);
+    const eq = rest.indexOf("=");
+    if (!Number.isInteger(index) || eq < 0) return [];
+    return [{ index, name: rest.slice(0, eq).trim(), value: rest.slice(eq + 1).trim() }];
+  });
   let parts: { baseUrl: string; endpointPath: string };
   try {
-    parts = splitApiUrlWithOpen(url, openQuery);
+    parts = splitApiUrlWithOpen(url, openQuery, pathSlots);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (message.startsWith("O nome") || message.startsWith("O valor")) throw new ApiValidationError(message);
+    if (message.startsWith("O nome") || message.startsWith("O valor") || message.startsWith("Dê um nome") || message.startsWith("Esse nome")) throw new ApiValidationError(message);
     throw new ApiValidationError("Informe a URL completa da API, começando com https://.");
   }
   if (parts.baseUrl === "https:" || url.length < 12) {
@@ -375,6 +391,8 @@ async function readApiBlock(formData: FormData, prefix: string, apiName: string,
   const responseTemplate = String(formData.get(field("response_template")) ?? "").trim();
   const templateError = validateResponseTemplate(responseTemplate);
   if (templateError) throw new BarricadeValidationError(templateError);
+  const errorRules = rulesFromForm(formData, prefix);
+  if ("error" in errorRules) throw new BarricadeValidationError(errorRules.error);
   return {
     apiId,
     monthlyTokens: readQuota(formData, field("monthly_tokens")),
@@ -382,6 +400,7 @@ async function readApiBlock(formData: FormData, prefix: string, apiName: string,
     url,
     endpointPath: parts.endpointPath,
     responseTemplate,
+    errorRules: errorRules.rules,
     api: {
       name: apiName,
       description,
@@ -472,7 +491,7 @@ function mergeHeaders(formData: FormData, previous: FieldPair[], prefix = "") {
 }
 
 function placeholderNames(text: string) {
-  return [...text.matchAll(/\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
+  return [...restoreTemplates(text).matchAll(/\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
 }
 
 function uniqueParams(names: string[]) {
@@ -565,6 +584,7 @@ function readBarricade(formData: FormData) {
     params: paramsFromForm(formData),
     allowedHeaders: formData.getAll("allowed_header").map(String).map((item) => item.trim()).filter(Boolean),
     responseTemplate: String(formData.get("response_template") ?? ""),
+    errorRules: [],
     active: formData.get("active") === "1",
     fallbackId: numberOrNull(formData.get("fallback_id")),
     fallbackOn: formData.getAll("fallback_on").map(String),

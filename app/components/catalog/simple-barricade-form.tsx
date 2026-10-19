@@ -29,6 +29,7 @@ export type SimpleDraft = {
   origins: string;
   dailyLimit: number;
   responseTemplate: string;
+  errorRules: ApiSlice["errorRules"];
   monthlyTokens: number | null;
   requestsPerMinute: number | null;
   calls: number;
@@ -113,6 +114,7 @@ export function SimpleBarricadeForm({
             queryFields: draft.queryFields,
             jsonBody: draft.jsonBody,
             responseTemplate: draft.responseTemplate,
+            errorRules: draft.errorRules,
             monthlyTokens: draft.monthlyTokens,
             requestsPerMinute: draft.requestsPerMinute,
             calls: draft.calls,
@@ -174,7 +176,7 @@ export function SimpleBarricadeForm({
             ))}
           </select>
         </label>
-        <p className="text-xs text-muted">A reserva entra em timeout, falha de conexão, erro 5xx ou cota estourada (HTTP 429). Quem chama continua usando GET {publicPath} com Authorization: Bearer.</p>
+        <p className="text-xs text-muted">Esta é a barricada reserva. Sem uma regra na API, ela entra em timeout, falha de conexão, erro 5xx ou cota estourada. Com uma regra, a API decide se tenta de novo, usa esta reserva ou envia o JSON sem ela. Quem chama continua usando GET {publicPath} com Authorization: Bearer.</p>
         <label className="flex items-center gap-2 text-sm text-foreground">
           <input type="checkbox" name="active" value="1" defaultChecked={draft.active} />
           Barricada ativa
@@ -269,6 +271,7 @@ function draftSignature(draft: SimpleDraft) {
     origins: draft.origins,
     dailyLimit: draft.dailyLimit,
     responseTemplate: draft.responseTemplate,
+    errorRules: draft.errorRules,
     monthlyTokens: draft.monthlyTokens,
     requestsPerMinute: draft.requestsPerMinute,
     calls: draft.calls,

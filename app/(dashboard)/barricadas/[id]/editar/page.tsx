@@ -48,7 +48,7 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
   for (const source of linked) {
     const linkedApi = await getApi(source.apiId);
     if (!linkedApi) continue;
-    sources.push(apiSlice(linkedApi, source.responseTemplate, usageOf(linkedApi.id)));
+    sources.push(apiSlice(linkedApi, source.responseTemplate, source.errorRules, usageOf(linkedApi.id)));
   }
   const primaryUsage = usageOf(api.id);
   const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "";
@@ -84,6 +84,7 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
           origins: current.origins.join("\n"),
           dailyLimit: current.dailyLimit,
           responseTemplate: current.responseTemplate,
+          errorRules: current.errorRules,
           monthlyTokens: primaryUsage?.monthlyTokens ?? null,
           requestsPerMinute: primaryUsage?.requestsPerMinute ?? null,
           calls: primaryUsage?.calls ?? 0,
@@ -99,7 +100,7 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
   );
 }
 
-function apiSlice(api: ApiRecord, responseTemplate: string, usage?: { monthlyTokens: number | null; requestsPerMinute: number | null; calls: number }): ApiSlice {
+function apiSlice(api: ApiRecord, responseTemplate: string, errorRules: ApiSlice["errorRules"], usage?: { monthlyTokens: number | null; requestsPerMinute: number | null; calls: number }): ApiSlice {
   const mode = bodyModeOf(api.requestContentType, api.bodyTemplate);
   const presented = presentApiTarget(api.baseUrl, api.endpointPath);
   return {
@@ -116,6 +117,7 @@ function apiSlice(api: ApiRecord, responseTemplate: string, usage?: { monthlyTok
     fields: mode === "form" ? fieldsFromTemplate(api.bodyTemplate) : [],
     jsonBody: mode === "json" ? api.bodyTemplate : "",
     responseTemplate,
+    errorRules,
     monthlyTokens: usage?.monthlyTokens ?? null,
     requestsPerMinute: usage?.requestsPerMinute ?? null,
     calls: usage?.calls ?? 0,

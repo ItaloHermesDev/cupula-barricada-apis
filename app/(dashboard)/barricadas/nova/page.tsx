@@ -43,6 +43,7 @@ async function NewBarricade() {
         origins: "",
         dailyLimit: 1000,
         responseTemplate: "",
+        errorRules: [],
         monthlyTokens: null,
         requestsPerMinute: null,
         calls: 0,

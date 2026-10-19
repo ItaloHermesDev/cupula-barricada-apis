@@ -77,6 +77,7 @@ const CREATE_BARRICADES = `
     fallback_id INT UNSIGNED NULL,
     fallback_on VARCHAR(120) NOT NULL DEFAULT 'timeout,conexao,http_5xx,cota',
     idempotent TINYINT(1) NOT NULL DEFAULT 0,
+    error_rules_json TEXT NULL,
     config_version INT UNSIGNED NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -96,6 +97,7 @@ const CREATE_SOURCES = `
     api_id INT UNSIGNED NOT NULL,
     position INT UNSIGNED NOT NULL,
     response_template MEDIUMTEXT NULL,
+    error_rules_json TEXT NULL,
     PRIMARY KEY (id),
     UNIQUE KEY barricade_sources_position (barricade_id, position),
     KEY barricade_sources_api_idx (api_id),
@@ -272,6 +274,7 @@ export function ensureSchema() {
       await db.query(CREATE_BARRICADES);
       await ensureBarricadeColumns(db);
       await db.query(CREATE_SOURCES);
+      await ensureColumn(db, "barricade_sources", "error_rules_json", "TEXT NULL");
       await db.query(CREATE_ROUTE_STATS);
       await ensureSignedDailyLimit(db);
       await db.query(CREATE_LOGOS);
@@ -365,6 +368,7 @@ async function ensureBarricadeColumns(db: Pool) {
     ["health_detail", "VARCHAR(160) NULL"],
     ["health_image", "TEXT NULL"],
     ["health_interval_minutes", "INT UNSIGNED NOT NULL DEFAULT 10"],
+    ["error_rules_json", "TEXT NULL"],
   ];
   for (const [name, definition] of columns) {
     await ensureColumn(db, "barricades", name, definition);

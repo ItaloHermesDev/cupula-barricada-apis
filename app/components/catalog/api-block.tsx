@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { fieldClass } from "@/app/components/catalog/fields";
 import { alertClass, successClass } from "@/app/components/text-field";
 import { HTTP_METHODS, type CatalogState, type HttpMethod } from "@/lib/catalog";
-import { leavesFromText, queryChoices, selectionFromTemplate, type Leaf, type OpenField } from "@/lib/draft";
+import { leavesFromText, pathChoices, queryChoices, selectionFromTemplate, type Leaf, type OpenField } from "@/lib/draft";
+import { ERROR_WAIT_MAX, type ErrorAction, type ErrorKind, type ErrorRule } from "@/lib/error-rules";
 
 type HeaderDraft = { name: string; value: string; keep: boolean };
 type Chosen = { on: boolean; name: string };
@@ -19,6 +20,7 @@ export type ApiSlice = {
   queryFields: OpenField[];
   jsonBody: string;
   responseTemplate: string;
+  errorRules: ErrorRule[];
   monthlyTokens: number | null;
   requestsPerMinute: number | null;
   calls: number;
@@ -48,6 +50,7 @@ export function ApiBlock({
   const [pingState, setPingState] = useState<CatalogState>({});
   const [pinging, setPinging] = useState(false);
   const [pinged, setPinged] = useState(false);
+  const [errorRules, setErrorRules] = useState<ErrorRule[]>(draft.errorRules);
   const template = useMemo(() => templateFromChosen(chosen), [chosen]);
   const listed = leaves.length > 0 ? leaves : selectionFromTemplate(draft.responseTemplate).map((item) => ({ path: item.path, sample: "" }));
   const listedPaths = new Set(listed.map((row) => row.path));
@@ -84,22 +87,41 @@ export function ApiBlock({
       <input type="hidden" name={nameOf("response_template")} value={template} />
       <label className="text-sm text-foreground">
         URL da API
-        <input name={nameOf("api_url")} required defaultValue={draft.apiUrl} placeholder="https://instagram-scraper-stable-api.p.rapidapi.com/ig_get_fb_profile.php" className={fieldClass} onChange={(event) => {
+          <input name={nameOf("api_url")} required defaultValue={draft.apiUrl} placeholder="https://instagram-scraper-stable-api.p.rapidapi.com/ig_get_fb_profile.php" className={fieldClass} onChange={(event) => {
           const nextUrl = event.target.value;
-          setQueryFields((current) => queryChoices(nextUrl, current));
+          setQueryFields((current) => [...pathChoices(nextUrl, current), ...queryChoices(nextUrl, current)]);
         }} />
       </label>
-      {queryFields.length > 0 ? (
+      {queryFields.some((field) => field.path) ? (
+        <div>
+          <p className="text-sm text-foreground">Pedaços do caminho</p>
+          <p className="mt-1 text-xs text-muted">Cada trecho depois do domínio pode virar parâmetro. Em /lookup/8.8.8.8, escreva ip no trecho 8.8.8.8 e marque “Quem chama informa”. O trecho lookup fica fixo.</p>
+          <div className="mt-3 flex flex-col gap-2">
+            {queryFields.filter((field) => field.path).map((field) => (
+              <div key={`path-${field.index}`} className="grid items-center gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                <span className="truncate font-mono text-xs text-foreground" title={field.value}>{field.value}</span>
+                <input value={field.name} placeholder="ip" aria-label={`Nome do parâmetro para ${field.value}`} className={fieldClass} onChange={(event) => setQueryFields((current) => current.map((item) => item.path && item.index === field.index ? { ...item, name: event.target.value } : item))} />
+                {field.open ? <input type="hidden" name={nameOf("path_slot")} value={`${field.index}|${field.name}=${field.value}`} /> : null}
+                <label className="flex items-center gap-2 text-xs text-muted">
+                  <input type="checkbox" name={nameOf("query_open_name")} value={field.name} checked={field.open} onChange={(event) => setQueryFields((current) => current.map((item) => item.path && item.index === field.index ? { ...item, open: event.target.checked } : item))} />
+                  Quem chama informa
+                </label>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {queryFields.some((field) => !field.path) ? (
         <div>
           <p className="text-sm text-foreground">Parâmetros da URL</p>
-          <p className="mt-1 text-xs text-muted">Marque “quem chama informa” só nos parâmetros que entram na URL da barricada. O valor ao lado é o padrão. Os demais ficam fixos.</p>
+          <p className="mt-1 text-xs text-muted">Estes ficam depois do ?. Marque “quem chama informa” só nos parâmetros que entram na URL da barricada. O valor ao lado é o padrão. Os demais ficam fixos.</p>
           <div className="mt-3 flex flex-col gap-2">
-            {queryFields.map((field) => (
+            {queryFields.filter((field) => !field.path).map((field) => (
               <div key={`query-${field.name}`} className="grid items-center gap-2 sm:grid-cols-[1fr_1fr_auto]">
                 <span className="truncate font-mono text-xs text-muted">{field.name}</span>
                 <span className="truncate font-mono text-xs text-foreground" title={field.value}>{field.value || "sem padrão"}</span>
                 <label className="flex items-center gap-2 text-xs text-muted">
-                  <input type="checkbox" name={nameOf("query_open_name")} value={field.name} checked={field.open} onChange={(event) => setQueryFields((current) => current.map((item) => item.name === field.name ? { ...item, open: event.target.checked } : item))} />
+                  <input type="checkbox" name={nameOf("query_open_name")} value={field.name} checked={field.open} onChange={(event) => setQueryFields((current) => current.map((item) => !item.path && item.name === field.name ? { ...item, open: event.target.checked } : item))} />
                   Quem chama informa
                 </label>
               </div>
@@ -229,7 +251,82 @@ export function ApiBlock({
           </div>
         )}
       </div>
+      <ErrorRules prefix={prefix} rules={errorRules} onChange={setErrorRules} />
     </section>
+  );
+}
+
+function ErrorRules({ prefix, rules, onChange }: { prefix: string; rules: ErrorRule[]; onChange: (rules: ErrorRule[]) => void }) {
+  const nameOf = (field: string) => `${prefix}${field}`;
+  function update(index: number, patch: Partial<ErrorRule>) {
+    onChange(rules.map((rule, ruleIndex) => ruleIndex === index ? { ...rule, ...patch } : rule));
+  }
+  return (
+    <div>
+      <p className="text-sm text-foreground">Quando esta API falhar</p>
+      <p className="mt-1 text-xs text-muted">A primeira linha que combinar é a que vale. Pode ser um erro 4xx, um erro 5xx ou um campo da resposta, como message igual a limite atingido.</p>
+      <div className="mt-3 flex flex-col gap-3">
+        {rules.map((rule, index) => (
+          <div key={index} className="flex flex-col gap-3 rounded-[12px] border border-line p-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-sm text-foreground">
+                Quando
+                <select name={nameOf("error_kind")} value={rule.kind} onChange={(event) => update(index, { kind: event.target.value as ErrorKind })} className={fieldClass}>
+                  <option value="http_4xx">Erro 4xx</option>
+                  <option value="http_5xx">Erro 5xx</option>
+                  <option value="field">Campo da resposta</option>
+                </select>
+              </label>
+              <label className="text-sm text-foreground">
+                Fazer
+                <select name={nameOf("error_action")} value={rule.action} onChange={(event) => update(index, { action: event.target.value as ErrorAction })} className={fieldClass}>
+                  <option value="retry">Tentar de novo</option>
+                  <option value="fallback">Ativar a barricada reserva</option>
+                  <option value="partial">Enviar o JSON sem esta API</option>
+                </select>
+              </label>
+            </div>
+            {rule.kind === "field" ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-sm text-foreground">
+                  Campo
+                  <input name={nameOf("error_field")} value={rule.field} onChange={(event) => update(index, { field: event.target.value })} placeholder="message" className={fieldClass} />
+                </label>
+                <label className="text-sm text-foreground">
+                  Mensagem
+                  <input name={nameOf("error_message")} value={rule.message} onChange={(event) => update(index, { message: event.target.value })} placeholder="limite atingido" className={fieldClass} />
+                </label>
+              </div>
+            ) : (
+              <>
+                <input type="hidden" name={nameOf("error_field")} value="" />
+                <input type="hidden" name={nameOf("error_message")} value="" />
+              </>
+            )}
+            {rule.action === "retry" ? (
+              <label className="text-sm text-foreground">
+                Esperar (segundos)
+                <input name={nameOf("error_wait")} type="number" min={1} max={ERROR_WAIT_MAX} value={rule.waitSeconds} onChange={(event) => update(index, { waitSeconds: Number(event.target.value) })} className={fieldClass} />
+              </label>
+            ) : (
+              <input type="hidden" name={nameOf("error_wait")} value="1" />
+            )}
+            <button type="button" className="self-start text-sm text-muted" onClick={() => onChange(rules.filter((_, ruleIndex) => ruleIndex !== index))}>
+              Remover este erro
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="mt-3 text-sm text-accent disabled:opacity-60"
+        disabled={rules.length >= 8}
+        onClick={() => onChange([...rules, { kind: "http_4xx", field: "", message: "", action: "partial", waitSeconds: 5 }])}
+      >
+        Adicionar erro
+      </button>
+      <p className="mt-2 text-xs text-muted">Tentar de novo espera esse tempo e chama esta API outra vez. Se continuar falhando, a resposta sai sem ela. Ativar a reserva troca a resposta inteira pela barricada escolhida em “Se falhar, usar”. Enviar o JSON sem esta API devolve o que as outras conseguiram.</p>
+    </div>
   );
 }
 
@@ -265,6 +362,7 @@ export function emptyApiSlice(method: HttpMethod = "GET"): ApiSlice {
     queryFields: [],
     jsonBody: "",
     responseTemplate: "",
+    errorRules: [],
     monthlyTokens: null,
     requestsPerMinute: null,
     calls: 0,

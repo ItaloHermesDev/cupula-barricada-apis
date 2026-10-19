@@ -1,12 +1,14 @@
 import "server-only";
 import type { RowDataPacket } from "mysql2/promise";
 import { execute, query } from "@/lib/db";
+import { type ErrorRule, parseStoredRules } from "@/lib/error-rules";
 
 export type BarricadeSource = {
   id: number;
   apiId: number;
   position: number;
   responseTemplate: string;
+  errorRules: ErrorRule[];
 };
 
 interface SourceRow extends RowDataPacket {
@@ -14,11 +16,12 @@ interface SourceRow extends RowDataPacket {
   api_id: number;
   position: number;
   response_template: string | null;
+  error_rules_json: string | null;
 }
 
 export async function listBarricadeSources(barricadeId: number) {
   const rows = await query<SourceRow[]>(
-    `SELECT id, api_id, position, response_template
+    `SELECT id, api_id, position, response_template, error_rules_json
      FROM barricade_sources
      WHERE barricade_id = ?
      ORDER BY position ASC, id ASC`,
@@ -29,6 +32,7 @@ export async function listBarricadeSources(barricadeId: number) {
     apiId: row.api_id,
     position: row.position,
     responseTemplate: row.response_template ?? "",
+    errorRules: parseStoredRules(row.error_rules_json),
   }));
 }
 
@@ -90,14 +94,14 @@ export async function recordRouteCall(barricadeId: number, apiId: number) {
 
 export async function replaceBarricadeSources(
   barricadeId: number,
-  sources: { apiId: number; responseTemplate: string }[],
+  sources: { apiId: number; responseTemplate: string; errorRules: ErrorRule[] }[],
 ) {
   await execute("DELETE FROM barricade_sources WHERE barricade_id = ?", [barricadeId]);
   for (const [position, source] of sources.entries()) {
     await execute(
-      `INSERT INTO barricade_sources (barricade_id, api_id, position, response_template)
-       VALUES (?, ?, ?, ?)`,
-      [barricadeId, source.apiId, position, source.responseTemplate.trim() || null],
+      `INSERT INTO barricade_sources (barricade_id, api_id, position, response_template, error_rules_json)
+       VALUES (?, ?, ?, ?, ?)`,
+      [barricadeId, source.apiId, position, source.responseTemplate.trim() || null, JSON.stringify(source.errorRules)],
     );
   }
 }
