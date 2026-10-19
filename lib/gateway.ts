@@ -7,8 +7,8 @@ import { dayKey } from "@/lib/catalog";
 import { execute } from "@/lib/db";
 import { isSensitiveHeader, maskHeaders, maskText } from "@/lib/secrets";
 import { assertPublicHttpUrl, DestinationError } from "@/lib/ssrf";
-import { flattenJson, leavesFromText, splitApiUrl } from "@/lib/draft";
-import { matchErrorRule, type ErrorRule } from "@/lib/error-rules";
+import { flattenJson, leavesFromText, parameterContract, splitApiUrl } from "@/lib/draft";
+import { describeErrorBody, fieldMessage, matchErrorRule, type ErrorRule } from "@/lib/error-rules";
 import { admit, clientAddress, collectQuery, hasControlCharacter, isHopHeader, readRequestText } from "@/lib/intake";
 import { combinePayloads } from "@/lib/combine";
 import { listBarricadeSources, recordRouteCall } from "@/lib/sources";
@@ -125,7 +125,7 @@ export async function serveBarricade(request: Request, slug: string) {
 }
 
 type UpstreamResult = ReturnType<typeof resultShell>;
-type Settled = { result: UpstreamResult; action: "keep" | "omit" | "fallback" | "legacy"; retried: boolean };
+type Settled = { result: UpstreamResult; action: "keep" | "omit" | "fallback" | "legacy"; retried: boolean; rule: ErrorRule | null };
 type Delivery = {
   blocked: "limite_diario" | "limite_minuto" | null;
   usedFallback: boolean;
@@ -230,17 +230,17 @@ async function recallPrimary(barricade: BarricadeRecord, consumer: ConsumerConte
 
 async function settleUpstream(result: UpstreamResult, rules: ErrorRule[], again: () => Promise<UpstreamResult>): Promise<Settled> {
   const matched = matchErrorRule(rules, { status: result.status, body: result.body });
-  if (!matched) return { result, action: result.ok ? "keep" : "legacy", retried: false };
+  if (!matched) return { result, action: result.ok ? "keep" : "legacy", retried: false, rule: null };
   if (matched.action === "retry") {
     await delay(matched.waitSeconds * 1000);
     const second = await again();
     const next = matchErrorRule(rules, { status: second.status, body: second.body });
-    if (!next) return { result: second, action: second.ok ? "keep" : "legacy", retried: true };
-    if (next.action === "fallback") return { result: second, action: "fallback", retried: true };
-    return { result: second, action: "omit", retried: true };
+    if (!next) return { result: second, action: second.ok ? "keep" : "legacy", retried: true, rule: null };
+    if (next.action === "fallback") return { result: second, action: "fallback", retried: true, rule: next };
+    return { result: second, action: "omit", retried: true, rule: next };
   }
-  if (matched.action === "fallback") return { result, action: "fallback", retried: false };
-  return { result, action: "omit", retried: false };
+  if (matched.action === "fallback") return { result, action: "fallback", retried: false, rule: matched };
+  return { result, action: "omit", retried: false, rule: matched };
 }
 
 function emptyDelivery() {
@@ -259,44 +259,129 @@ export async function sampleBarricade(id: number, query: Record<string, string>)
       return { error: "Um parâmetro da chamada é inválido." };
     }
   }
-  const allowed = new Set(barricade.params.map((param) => param.name));
+  const contract = await barricadeContract(barricade);
+  const allowedNames = contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name);
+  const allowed = new Set(allowedNames);
   if (allowed.size > 0 && Object.keys(query).some((key) => !allowed.has(key))) {
     return { error: "A chamada enviou um parâmetro que esta barricada não aceita." };
   }
-  const missing = barricade.params.find((param) => !query[param.name]?.trim());
+  const asked = contract.known.length > 0 ? contract.asked : barricade.params.filter((param) => param.required).map((param) => param.name);
+  const missing = asked.find((name) => !query[name]?.trim());
   if (missing) return { error: "Faltam parâmetros obrigatórios." };
   const consumer: ConsumerContext = { query, header: {}, body: {}, path: { ...query } };
+  const report = await sampleDelivery(barricade, consumer, true);
+  if ("error" in report) return report;
+  return {
+    total: report.total,
+    apis: report.apis,
+    notice: report.fallback ? `Chamou a barricada reserva ${report.fallback}.` : "A barricada reserva não foi chamada.",
+  };
+}
+
+async function barricadeContract(barricade: BarricadeRecord) {
+  const primary = await getApi(barricade.apiId);
+  const linked = await listBarricadeSources(barricade.id);
+  const extras = await Promise.all(linked.map((source) => getApi(source.apiId)));
+  return parameterContract([primary, ...extras].filter((source) => source != null).flatMap((source) => [
+    source.endpointPath,
+    source.bodyTemplate,
+    ...source.query.map((pair) => pair.value),
+    ...source.pathParams.map((pair) => pair.value),
+  ]));
+}
+
+type SampleApi = { name: string; status: string; body: string };
+type SampleReport = { total: string; apis: SampleApi[]; fallback: string | null; ok: boolean };
+
+async function sampleDelivery(barricade: BarricadeRecord, consumer: ConsumerContext, allowFallback: boolean): Promise<SampleReport | { error: string }> {
   const primary = await getApi(barricade.apiId);
   if (!primary) return { error: "API não encontrada." };
+  const secret = primary.active ? await getApiSecret(primary.id) : "";
+  const first = primary.active
+    ? await callUpstream(primary, consumer, secret)
+    : { ...emptyResult(), failure: "destino_bloqueado" as const };
+  const settledPrimary = await settleUpstream(first, barricade.errorRules, () => callUpstream(primary, consumer, secret));
+  const apis = [describeSample(primary.name, settledPrimary, secret)];
+  const wantsFallback = (settled: Settled) => allowFallback && (
+    settled.action === "fallback" ||
+    (settled.action === "legacy" && canFallback(barricade, settled.result.failure))
+  );
+  if (wantsFallback(settledPrimary)) {
+    const hopped = await sampleHop(barricade, consumer);
+    if (hopped) return { ok: true, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
+  }
+
   const linked = await listBarricadeSources(barricade.id);
-  const targets = [
-    { api: primary, template: barricade.responseTemplate },
-    ...(await Promise.all(linked.map(async (source) => ({ api: await getApi(source.apiId), template: source.responseTemplate })))),
-  ].filter((item): item is { api: NonNullable<typeof item.api>; template: string } => Boolean(item.api));
-  const called = await Promise.all(targets.map(async (target) => {
-    const secret = await getApiSecret(target.api.id);
-    const result = await callUpstream(target.api, consumer, secret);
-    return { target, result, secret };
-  }));
+  const extras: { settled: Settled; template: string; secret: string; index: number }[] = [];
+  for (const source of linked) {
+    const api = await getApi(source.apiId);
+    if (!api?.active) continue;
+    const extraSecret = await getApiSecret(api.id);
+    const result = await callUpstream(api, consumer, extraSecret);
+    const settled = await settleUpstream(result, source.errorRules, () => callUpstream(api, consumer, extraSecret));
+    apis.push(describeSample(api.name, settled, extraSecret));
+    extras.push({ settled, template: source.responseTemplate, secret: extraSecret, index: apis.length - 1 });
+  }
+  if (allowFallback && extras.some((extra) => extra.settled.action === "fallback")) {
+    const hopped = await sampleHop(barricade, consumer);
+    if (hopped) return { ok: true, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
+  }
+
   const parts: unknown[] = [];
-  const apis = called.map(({ target, result, secret }) => {
-    const secrets = secret.length >= 4 ? [secret] : [];
-    const body = readableJson(maskText(result.text || result.failure || "Sem conteúdo.", secrets));
-    if (result.ok) {
-      try {
-        parts.push(renderPayload(result.body, target.template, consumer));
-      } catch {
-        return { name: target.api.name, status: `HTTP ${result.status ?? "—"} · resposta inválida`, body };
-      }
-    }
-    const status = result.ok
-      ? `HTTP ${result.status ?? 200} · ${result.durationMs} ms`
-      : `Falhou${result.status ? ` · HTTP ${result.status}` : ""} · ${result.durationMs} ms`;
-    return { name: target.api.name, status, body };
-  });
-  const secrets = called.map((item) => item.secret).filter((secret) => secret.length >= 4);
+  const secrets = [secret, ...extras.map((extra) => extra.secret)].filter((item) => item.length >= 4);
+  if (settledPrimary.action === "keep") pushSamplePart(parts, apis[0], settledPrimary.result.body, barricade.responseTemplate, consumer);
+  for (const extra of extras) {
+    if (extra.settled.action !== "keep") continue;
+    pushSamplePart(parts, apis[extra.index], extra.settled.result.body, extra.template, consumer);
+  }
   const total = parts.length > 0 ? maskText(JSON.stringify(combinePayloads(parts), null, 2), secrets) : "Nenhuma API devolveu conteúdo para a barricada.";
-  return { total, apis };
+  return { ok: parts.length > 0, total, apis, fallback: null };
+}
+
+async function sampleHop(barricade: BarricadeRecord, consumer: ConsumerContext) {
+  const alternative = barricade.fallbackId ? await loadAlternative(barricade.fallbackId) : null;
+  if (!alternative || !(barricade.method === "GET" || barricade.idempotent)) return null;
+  const second = await sampleDelivery(alternative, consumer, false);
+  if ("error" in second || !second.ok) return null;
+  return {
+    name: alternative.name,
+    total: second.total,
+    apis: second.apis.map((api) => ({ ...api, name: `${alternative.name} · ${api.name}` })),
+  };
+}
+
+function describeSample(name: string, settled: Settled, secret: string): SampleApi {
+  const result = settled.result;
+  const secrets = secret.length >= 4 ? [secret] : [];
+  const body = readableJson(maskText(result.text || result.failure || "Sem conteúdo.", secrets));
+  const detail = maskText(sampleErrorText(result, settled.rule), secrets);
+  if (result.ok && settled.action === "keep") {
+    return { name, status: `HTTP ${result.status ?? 200} · ${result.durationMs} ms`, body };
+  }
+  const http = result.status ? `HTTP ${result.status}` : "";
+  const notes = [
+    result.ok ? http : `Falhou${http ? ` · ${http}` : ""}`,
+    detail,
+    settled.retried ? "tentou de novo" : "",
+    settled.action === "omit" ? "ficou de fora da resposta" : "",
+    `${result.durationMs} ms`,
+  ].filter(Boolean);
+  return { name, status: notes.join(" · "), body };
+}
+
+function sampleErrorText(result: UpstreamResult, rule: ErrorRule | null) {
+  const body = result.body ?? result.text;
+  if (rule?.kind === "field") return fieldMessage(body, rule.field) || `${rule.field}: ${rule.message}`;
+  if (result.ok) return "";
+  return describeErrorBody(body);
+}
+
+function pushSamplePart(parts: unknown[], api: SampleApi, body: unknown, template: string, consumer: ConsumerContext) {
+  try {
+    parts.push(renderPayload(body, template, consumer));
+  } catch {
+    api.status = `${api.status} · resposta inválida`;
+  }
 }
 
 function readableJson(value: string) {
@@ -707,10 +792,13 @@ function errorResponse(
 
 async function readIncoming(request: Request, barricade: BarricadeRecord) {
   const url = new URL(request.url);
-  const collected = collectQuery(url.searchParams, barricade.params.map((param) => param.name));
+  const contract = await barricadeContract(barricade);
+  const allowed = contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name);
+  const collected = collectQuery(url.searchParams, allowed);
   if ("error" in collected && collected.error) return { error: collected.error };
   const query = collected.query ?? {};
-  if (barricade.params.some((param) => param.required && !query[param.name]?.trim())) {
+  const asked = contract.known.length > 0 ? contract.asked : barricade.params.filter((param) => param.required).map((param) => param.name);
+  if (asked.some((name) => !query[name]?.trim())) {
     return { error: "parametro_obrigatorio" as const };
   }
   const allowedHeaders = new Set(barricade.allowedHeaders.map((header) => header.toLowerCase()));

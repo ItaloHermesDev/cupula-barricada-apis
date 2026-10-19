@@ -80,19 +80,29 @@ export function callParameters(input: {
     if (!current.value && param.value) current.value = param.value;
   }
 
-  function scan(text: string) {
+  const covered = new Set<string>();
+
+  function scan(text: string, inPath: boolean) {
     QUERY_PLACEHOLDER.lastIndex = 0;
     for (const match of text.matchAll(QUERY_PLACEHOLDER)) {
-      add({ name: match[1], value: (match[2] ?? "").trim(), required: true });
+      const name = match[1];
+      const value = (match[2] ?? "").trim();
+      if (!inPath && match[0].includes("|") && value) {
+        if (!found.has(name)) covered.add(name);
+        continue;
+      }
+      covered.delete(name);
+      add({ name, value: "", required: true });
     }
   }
 
   const endpointPath = restoreTemplates(input.endpointPath);
-  scan(endpointPath.split("?")[0] ?? "");
-  for (const pair of endpointQuery(endpointPath)) scan(pair.value);
-  for (const pair of input.query) scan(pair.value);
-  for (const pair of input.pathParams) scan(pair.value);
-  scan(input.bodyTemplate);
+  const queryAt = endpointPath.indexOf("?");
+  scan(queryAt >= 0 ? endpointPath.slice(0, queryAt) : endpointPath, true);
+  for (const pair of endpointQuery(endpointPath)) scan(pair.value, false);
+  for (const pair of input.query) scan(pair.value, false);
+  for (const pair of input.pathParams) scan(pair.value, true);
+  scan(input.bodyTemplate, false);
 
   if (input.params.length > 0) {
     const allowed = new Set(input.params.map((param) => param.name));
@@ -100,13 +110,66 @@ export function callParameters(input: {
       if (!allowed.has(name)) found.delete(name);
     }
     for (const param of input.params) {
+      if (covered.has(param.name) && !found.has(param.name)) continue;
       const current = found.get(param.name);
       if (current) current.required = true;
-      else add({ name: param.name, value: "", required: true });
+      else add({ name: param.name, value: "", required: param.required });
     }
   }
 
   return [...found.values()];
+}
+
+export function parameterContract(texts: string[]) {
+  const asked = new Set<string>();
+  const known = new Set<string>();
+  function collect(text: string, inPath: boolean) {
+    QUERY_PLACEHOLDER.lastIndex = 0;
+    for (const match of text.matchAll(QUERY_PLACEHOLDER)) {
+      const name = match[1];
+      if (!name || SECRET_QUERY.test(name)) continue;
+      known.add(name);
+      const value = (match[2] ?? "").trim();
+      if (inPath || !(match[0].includes("|") && value)) asked.add(name);
+    }
+  }
+  for (const text of texts) {
+    const restored = restoreTemplates(text);
+    const lineBreak = restored.indexOf("\n");
+    const head = lineBreak >= 0 ? restored.slice(0, lineBreak) : restored;
+    const tail = lineBreak >= 0 ? restored.slice(lineBreak + 1) : "";
+    if (head.startsWith("/")) {
+      const queryAt = head.indexOf("?");
+      collect(queryAt >= 0 ? head.slice(0, queryAt) : head, true);
+      if (queryAt >= 0) collect(head.slice(queryAt + 1), false);
+    } else {
+      collect(head, false);
+    }
+    if (tail) collect(tail, false);
+  }
+  return { asked: [...asked], known: [...known] };
+}
+
+export function replaceQueryValue(rawUrl: string, name: string, value: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl.trim());
+  } catch {
+    return rawUrl;
+  }
+  const search = new URLSearchParams();
+  let replaced = false;
+  for (const [key, current] of url.searchParams) {
+    if (!replaced && key === name) {
+      search.append(key, value);
+      replaced = true;
+      continue;
+    }
+    search.append(key, current);
+  }
+  if (!replaced) search.append(name, value);
+  const query = search.toString();
+  return `${url.origin}${url.pathname}${query ? `?${query}` : ""}${url.hash}`;
 }
 
 export function queryChoices(rawUrl: string, previous: OpenField[] = []) {
@@ -121,6 +184,19 @@ export function queryChoices(rawUrl: string, previous: OpenField[] = []) {
     if (!name || SECRET_QUERY.test(name)) return [];
     return [{ name, value, open: openByName.get(name) ?? false }];
   });
+}
+
+export function replacePathValue(rawUrl: string, index: number, value: string) {
+  let url: URL;
+  try {
+    url = new URL(rawUrl.trim());
+  } catch {
+    return rawUrl;
+  }
+  const segments = url.pathname.split("/");
+  if (!Number.isInteger(index) || index < 0 || index >= segments.length) return rawUrl;
+  segments[index] = value;
+  return `${url.origin}${segments.join("/")}${url.search}${url.hash}`;
 }
 
 export function pathChoices(rawUrl: string, previous: OpenField[] = []) {
@@ -165,7 +241,7 @@ export function presentApiTarget(baseUrl: string, endpointPath: string) {
   return { apiUrl: `${base}${path}${query ? `?${query}` : ""}`, queryFields: [...pathFields, ...queryFields] };
 }
 
-export function splitApiUrlWithOpen(raw: string, openNames: string[], pathSlots: { index: number; name: string; value: string }[] = []) {
+export function splitApiUrlWithOpen(raw: string, openNames: string[], pathSlots: { index: number; name: string; value: string }[] = [], queryValues?: Map<string, string>) {
   const url = new URL(raw.trim());
   const open = new Set(openNames);
   const segments = url.pathname.split("/").map((segment) => restoreTemplates(safeDecode(segment)));
@@ -176,16 +252,17 @@ export function splitApiUrlWithOpen(raw: string, openNames: string[], pathSlots:
     if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("O nome do parâmetro usa letras, números, _ ou -.");
     if (/[{}|]/.test(slot.value)) throw new Error("O valor padrão do parâmetro não pode conter {, } ou |.");
     const template = `{{consumer.query.${name}|${slot.value}}}`;
-    let index = slot.index;
-    const current = segments[index];
-    if (current !== slot.value && current !== template) {
-      index = segments.findIndex((segment) => segment === slot.value || segment === template);
+    if (segments[slot.index] !== undefined) {
+      segments[slot.index] = template;
+      continue;
     }
+    const index = segments.findIndex((segment) => segment === slot.value || segment === template);
     if (index < 0) continue;
     segments[index] = template;
   }
   const parts: string[] = [];
-  for (const [name, value] of url.searchParams) {
+  for (const [name, current] of url.searchParams) {
+    const value = queryValues?.has(name) ? queryValues.get(name) ?? "" : current;
     if (open.has(name) && !SECRET_QUERY.test(name)) {
       if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("O nome do parâmetro usa letras, números, _ ou -.");
       if (/[{}|]/.test(value)) throw new Error("O valor padrão do parâmetro não pode conter {, } ou |.");

@@ -74,6 +74,63 @@ export function collectErrorRules(rows: unknown[]) {
   return { rules };
 }
 
+const MESSAGE_FIELD = /^(message|mensage|msg|error|detail|description|reason|title)$/i;
+
+export function fieldMessage(body: unknown, path: string) {
+  const value = readPath(parseBody(body), path);
+  if (typeof value === "string" && value.trim()) return `${path}: ${value.trim().slice(0, 180)}`;
+  if (typeof value === "number" || typeof value === "boolean") return `${path}: ${String(value)}`;
+  return "";
+}
+
+export function describeErrorBody(body: unknown): string {
+  const parsed = parseBody(body);
+  if (typeof parsed === "string") {
+    const trimmed = parsed.trim();
+    return trimmed ? `mensagem: ${trimmed.slice(0, 180)}` : "";
+  }
+  const leaves: { path: string; value: string }[] = [];
+  const queue: { value: unknown; path: string }[] = [{ value: parsed, path: "" }];
+  let index = 0;
+  while (index < queue.length && leaves.length < 40) {
+    const current = queue[index++];
+    if (Array.isArray(current.value)) {
+      current.value.slice(0, 3).forEach((item, itemIndex) => {
+        queue.push({ value: item, path: current.path ? `${current.path}.${itemIndex}` : String(itemIndex) });
+      });
+      continue;
+    }
+    if (current.value && typeof current.value === "object") {
+      for (const [key, item] of Object.entries(current.value)) {
+        queue.push({ value: item, path: current.path ? `${current.path}.${key}` : key });
+      }
+      continue;
+    }
+    if (!current.path) continue;
+    const name = current.path.split(".").pop() ?? "";
+    if (typeof current.value === "string" && current.value.trim()) {
+      leaves.push({ path: current.path, value: current.value.trim().slice(0, 180) });
+      continue;
+    }
+    if ((typeof current.value === "number" || typeof current.value === "boolean") && MESSAGE_FIELD.test(name)) {
+      leaves.push({ path: current.path, value: String(current.value) });
+    }
+  }
+  const preferred = leaves.filter((item) => MESSAGE_FIELD.test(item.path.split(".").pop() ?? ""));
+  return (preferred.length > 0 ? preferred : leaves).slice(0, 3).map((item) => `${item.path}: ${item.value}`).join(" · ");
+}
+
+function parseBody(body: unknown): unknown {
+  if (typeof body !== "string") return body;
+  const trimmed = body.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return body;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return body;
+  }
+}
+
 export function matchErrorRule(rules: ErrorRule[], outcome: { status: number | null; body: unknown }) {
   for (const rule of rules) {
     if (rule.kind === "http_4xx" && inRange(outcome.status, 400, 499)) return rule;

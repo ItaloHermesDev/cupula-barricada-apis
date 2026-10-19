@@ -199,6 +199,7 @@ function SampleForm({ row }: { row: BarricadeOpsRow }) {
       </button>
       {state.total ? (
         <div className="flex flex-col gap-3">
+          {state.notice ? <p className="text-sm text-foreground">{state.notice}</p> : null}
           <div>
             <h3 className="text-sm font-medium text-foreground">Resultado da barricada</h3>
             <JsonBlock text={state.total} />
@@ -206,7 +207,7 @@ function SampleForm({ row }: { row: BarricadeOpsRow }) {
           {(state.apis ?? []).map((api, index) => (
             <div key={`${api.name}-${index}`}>
               <h3 className="text-sm font-medium text-foreground">{api.name}</h3>
-              <p className="mt-1 text-xs text-muted">{api.status}</p>
+              <p className="mt-1 text-xs break-words text-muted">{api.status}</p>
               <JsonBlock text={api.body} />
             </div>
           ))}

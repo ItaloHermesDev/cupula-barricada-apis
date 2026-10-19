@@ -120,13 +120,11 @@ function buildPrompt({
       "Chamada com parâmetros na URL.",
       "Envie os parâmetros na query string da URL, no formato nome=valor.",
       "Troque {nome} pelo valor da chamada.",
-      "Todos os parâmetros são obrigatórios. Sem algum deles, a barricada recusa a chamada.",
-      "Padrão preenchido é um exemplo do valor. A chamada ainda precisa enviar o parâmetro.",
+      "Todos os parâmetros listados são obrigatórios. Sem algum deles, a barricada recusa a chamada.",
+      "Um parâmetro com valor padrão fica fora desta lista. A barricada usa o padrão e não pede esse campo.",
     );
     for (const field of fields) {
-      const fallback = field.value ? field.value : "nenhum";
-      const required = field.required ? "sim" : "não";
-      lines.push(`- ${field.name}={${field.name}} | padrão: ${fallback} | obrigatório: ${required}`);
+      lines.push(`- ${field.name}={${field.name}} | obrigatório: sim`);
     }
   }
   lines.push("", "A resposta tem esta forma:", response);

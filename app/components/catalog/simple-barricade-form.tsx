@@ -184,6 +184,7 @@ export function SimpleBarricadeForm({
         <button type="submit" disabled={saving} className={submitClass}>
           {saving ? "Salvando..." : "Salvar"}
         </button>
+        {saveState.error ? <p className={alertClass}>{saveState.error}</p> : null}
       </section>
       </div>
     </form>

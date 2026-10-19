@@ -22,7 +22,7 @@ import {
 } from "@/lib/catalog";
 import { requireAnyPage, requirePage } from "@/lib/dal";
 import { distinctOutputError } from "@/lib/combine";
-import { restoreTemplates, splitApiUrlWithOpen, templateFromFields, type OpenField } from "@/lib/draft";
+import { parameterContract, splitApiUrlWithOpen, templateFromFields, type OpenField } from "@/lib/draft";
 import { inspectApi, previewTemplate, probeUpstream, sampleBarricade } from "@/lib/gateway";
 import { checkBarricade, setRoutine } from "@/lib/health";
 import { rulesFromForm } from "@/lib/error-rules";
@@ -119,6 +119,7 @@ export async function renewToken(_state: CatalogState, formData: FormData): Prom
 export type BarricadeSampleState = {
   error?: string;
   total?: string;
+  notice?: string;
   apis?: { name: string; status: string; body: string }[];
 };
 
@@ -299,10 +300,6 @@ async function readDraft(formData: FormData) {
   }
   const clash = distinctOutputError([primary.responseTemplate, ...sources.map((source) => source.responseTemplate)]);
   if (clash) throw new BarricadeValidationError(clash);
-  const rules = [primary.errorRules, ...sources.map((source) => source.errorRules)].flat();
-  if (rules.some((rule) => rule.action === "fallback") && !numberOrNull(formData.get("fallback_id"))) {
-    throw new BarricadeValidationError("Escolha a barricada reserva em “Se falhar, usar” para poder ativá-la num erro.");
-  }
   return {
     url: primary.url,
     token: String(formData.get("token") ?? ""),
@@ -322,9 +319,9 @@ async function readDraft(formData: FormData) {
         .filter(Boolean),
       dailyLimit: Number(formData.get("daily_limit") ?? 1000),
       minuteLimit: 0,
-      params: uniqueParams([
-        ...placeholderNames(`${primary.endpointPath}\n${primary.api.bodyTemplate}`),
-        ...sources.flatMap((source) => placeholderNames(`${source.endpointPath}\n${source.api.bodyTemplate}`)),
+      params: callerParams([
+        `${primary.endpointPath}\n${primary.api.bodyTemplate}`,
+        ...sources.map((source) => `${source.endpointPath}\n${source.api.bodyTemplate}`),
       ]),
       allowedHeaders: [] as string[],
       responseTemplate: primary.responseTemplate,
@@ -363,9 +360,15 @@ async function readApiBlock(formData: FormData, prefix: string, apiName: string,
     if (!Number.isInteger(index) || eq < 0) return [];
     return [{ index, name: rest.slice(0, eq).trim(), value: rest.slice(eq + 1).trim() }];
   });
+  const queryValues = new Map<string, string>();
+  for (const item of formData.getAll(field("query_default")).map(String)) {
+    const eq = item.indexOf("=");
+    if (eq <= 0) continue;
+    queryValues.set(item.slice(0, eq), item.slice(eq + 1));
+  }
   let parts: { baseUrl: string; endpointPath: string };
   try {
-    parts = splitApiUrlWithOpen(url, openQuery, pathSlots);
+    parts = splitApiUrlWithOpen(url, openQuery, pathSlots, queryValues);
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.startsWith("O nome") || message.startsWith("O valor") || message.startsWith("Dê um nome") || message.startsWith("Esse nome")) throw new ApiValidationError(message);
@@ -490,19 +493,9 @@ function mergeHeaders(formData: FormData, previous: FieldPair[], prefix = "") {
     .slice(0, 40);
 }
 
-function placeholderNames(text: string) {
-  return [...restoreTemplates(text).matchAll(/\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)/g)].map((match) => match[1]);
-}
-
-function uniqueParams(names: string[]) {
-  const seen = new Set<string>();
-  const params: { name: string; required: boolean }[] = [];
-  for (const name of names) {
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    params.push({ name, required: true });
-  }
-  return params;
+function callerParams(texts: string[]) {
+  const contract = parameterContract(texts);
+  return contract.known.map((name) => ({ name, required: contract.asked.includes(name) }));
 }
 
 function readOpenFields(formData: FormData, prefix = ""): OpenField[] {
