@@ -63,8 +63,7 @@ export function CommandShell({
   }
 
   return (
-    <div className="relative flex min-h-full w-full flex-1">
-      <div className="command-atmosphere pointer-events-none absolute inset-0" />
+    <div className="relative flex min-h-full w-full flex-1 bg-background">
       {mobileOpen ? (
         <button
           type="button"
@@ -74,7 +73,7 @@ export function CommandShell({
         />
       ) : null}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-line bg-sidebar/95 text-sidebar-foreground backdrop-blur-xl transition-[width,transform] duration-200 md:sticky md:top-0 md:z-20 md:h-screen md:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-line bg-sidebar text-sidebar-foreground transition-[width,transform] duration-200 md:sticky md:top-0 md:z-20 md:h-screen md:translate-x-0 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
         } ${collapsed ? "md:w-[76px]" : "md:w-64"}`}
       >
@@ -94,15 +93,15 @@ export function CommandShell({
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 title={item.label}
-                className={`flex items-center gap-3 rounded-[12px] border px-3 py-2.5 text-sm transition-colors ${
+                className={`flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-sm transition-colors ${
                   collapsed ? "md:justify-center md:px-0" : ""
                 } ${
                   active
-                    ? "border-[#1f6a86] bg-[#12384a] text-foreground"
-                    : "border-transparent text-sidebar-muted hover:border-line hover:bg-white/5 hover:text-foreground"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-sidebar-muted hover:bg-white/5 hover:text-foreground"
                 }`}
               >
-                <Icon name={ICONS[item.key] ?? "overview"} className={active ? "h-4 w-4 text-accent" : "h-4 w-4"} />
+                <Icon name={ICONS[item.key] ?? "overview"} className="h-4 w-4" />
                 <span className={collapsed ? "md:sr-only" : ""}>{item.label}</span>
               </Link>
             );
@@ -128,12 +127,12 @@ export function CommandShell({
             href="/conta"
             title="Meus dados"
             aria-current={pathname === "/conta" ? "page" : undefined}
-            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-[12px] border px-3 py-2 text-sm transition-colors ${
-              collapsed ? "md:px-0" : ""
+            className={`mt-3 flex w-full items-center gap-2 rounded-[12px] border px-3 py-2 text-sm transition-colors ${
+              collapsed ? "md:justify-center md:px-0" : ""
             } ${
               pathname === "/conta"
-                ? "border-[#1f6a86] bg-[#12384a] text-foreground"
-                : "border-line text-sidebar-foreground hover:border-accent/40 hover:text-accent"
+                ? "border-transparent bg-accent text-accent-foreground"
+                : "border-line text-sidebar-muted hover:bg-white/5 hover:text-foreground"
             }`}
           >
             <Icon name="settings" />
@@ -143,7 +142,7 @@ export function CommandShell({
             <button
               type="submit"
               title="Sair"
-              className={`flex w-full items-center justify-center gap-2 rounded-[12px] border border-line px-3 py-2 text-sm text-sidebar-foreground transition-colors hover:border-accent/40 hover:text-accent ${collapsed ? "md:px-0" : ""}`}
+              className={`flex w-full items-center gap-2 rounded-[12px] border border-line px-3 py-2 text-sm text-sidebar-muted transition-colors hover:bg-white/5 hover:text-foreground ${collapsed ? "md:justify-center md:px-0" : ""}`}
             >
               <Icon name="logout" />
               <span className={collapsed ? "md:sr-only" : ""}>Sair</span>
@@ -152,7 +151,7 @@ export function CommandShell({
         </div>
       </aside>
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line/80 bg-[#080B12]/75 px-4 py-3 backdrop-blur-xl md:px-6 lg:px-8">
+        <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-line bg-background px-4 py-3 md:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
@@ -170,8 +169,8 @@ export function CommandShell({
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <p className="hidden items-center gap-2 rounded-full border border-success/25 bg-success/10 px-3 py-1.5 text-xs text-success sm:flex">
-              <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-success" />
+            <p className="hidden items-center gap-2 rounded-[12px] border border-line bg-card px-3 py-1.5 text-xs text-success sm:flex">
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
               Sessão ativa
             </p>
             <div className="relative">
@@ -185,7 +184,7 @@ export function CommandShell({
                 <Avatar name={user.name} />
               </button>
               {accountOpen ? (
-                <div className="absolute right-0 z-30 mt-2 w-64 rounded-[14px] border border-line bg-card p-3 shadow-2xl">
+                <div className="absolute right-0 z-30 mt-2 w-64 rounded-[14px] border border-line bg-card p-3">
                   <p className="truncate text-sm font-medium">{user.name}</p>
                   <p className="truncate text-xs text-muted">{user.email}</p>
                   <Link
@@ -219,7 +218,7 @@ function Avatar({ name }: { name: string }) {
     .join("");
 
   return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#132033] text-xs font-semibold text-accent shadow-[0_0_12px_rgba(0,229,255,0.18)]">
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold text-accent">
       {initials}
     </span>
   );

@@ -29,7 +29,7 @@ export function SessionJourneys({ sessions }: { sessions: JourneySession[] }) {
             key={session.sessionId}
             type="button"
             onClick={() => setOpenId(session.sessionId)}
-            className="flex items-center justify-between gap-3 rounded-[12px] border border-line bg-card/90 px-3 py-2 text-left hover:border-accent/40"
+            className="flex items-center justify-between gap-3 rounded-[12px] border border-line bg-card px-3 py-2 text-left hover:border-accent/40"
           >
             <span className="min-w-0">
               <span className="block truncate font-mono text-xs text-foreground">{session.sessionId}</span>

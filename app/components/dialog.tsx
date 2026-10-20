@@ -29,14 +29,14 @@ export function Dialog({
       <button
         type="button"
         aria-label="Fechar"
-        className="absolute inset-0 bg-black/65 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/70"
         onClick={onClose}
       />
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
-        className={`relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-line bg-card p-6 shadow-2xl ${wide ? "max-w-3xl" : "max-w-lg"}`}
+        className={`relative z-10 max-h-[90vh] w-full overflow-y-auto rounded-[16px] border border-line bg-card p-6 ${wide ? "max-w-3xl" : "max-w-lg"}`}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

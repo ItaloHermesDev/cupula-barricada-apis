@@ -36,7 +36,7 @@ export function BarricadeOps({ rows }: { rows: BarricadeOpsRow[] }) {
     <section className="relative flex flex-col gap-3">
       <ul className="flex flex-col gap-2">
         {rows.map((row) => (
-          <li key={row.id} className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line bg-card/90 px-4 py-3">
+          <li key={row.id} className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line bg-card px-4 py-3">
             {row.logoVersion ? (
               <BarricadeMark id={row.id} updatedAt={row.logoVersion} />
             ) : (
@@ -196,7 +196,7 @@ function SampleForm({ row }: { row: BarricadeOpsRow }) {
         </div>
       )}
       {state.error ? <p className="text-sm text-danger">{state.error}</p> : null}
-      <button type="submit" disabled={pending} className="self-start rounded-[12px] bg-gradient-to-r from-[#7A45FF] to-[#D24BFF] px-4 py-2 text-sm font-medium text-white disabled:opacity-60">
+      <button type="submit" disabled={pending} className="self-start rounded-[12px] bg-accent px-4 py-2 text-sm font-medium text-accent-foreground disabled:opacity-60">
         {pending ? "Chamando..." : "Chamar barricada"}
       </button>
       {state.total ? (

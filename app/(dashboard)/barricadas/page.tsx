@@ -26,21 +26,20 @@ async function Barricades() {
   const names = new Map(items.map((item) => [item.id, item.name]));
 
   return (
-    <div className="relative flex flex-col gap-4">
-      <div className="pointer-events-none absolute -top-10 right-0 h-72 w-72 rounded-full bg-violet/20 blur-3xl" />
-      <div className="relative flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted">{items.length === 0 ? "Nenhuma barricada" : `${items.length} ${items.length === 1 ? "barricada" : "barricadas"}`}</p>
-        <Link href="/barricadas/nova" className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#7A45FF] to-[#D24BFF] px-4 py-2 text-sm font-medium text-white shadow-[0_8px_24px_rgba(168,70,255,0.35)]">
+        <Link href="/barricadas/nova" className="inline-flex items-center gap-1.5 rounded-[12px] bg-accent px-4 py-2 text-sm font-medium text-accent-foreground">
           <span aria-hidden="true">+</span>
           Nova barricada
         </Link>
       </div>
       {items.length === 0 ? (
-        <p className="relative rounded-[14px] border border-dashed border-line px-4 py-8 text-sm text-muted">
+        <p className="rounded-[14px] border border-dashed border-line px-4 py-8 text-sm text-muted">
           Cadastre a URL da API. A barricada vira o endereço que as aplicações chamam.
         </p>
       ) : (
-        <div className="relative flex flex-wrap gap-5">
+        <div className="flex flex-wrap gap-5">
           {items.map((item) => (
             <BarricadeCard key={item.id} item={cardOf(item, item.fallbackId ? names.get(item.fallbackId) ?? null : null)} />
           ))}

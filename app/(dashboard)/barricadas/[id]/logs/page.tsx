@@ -85,7 +85,7 @@ async function BarricadeLogs({
           </Link>
         ))}
       </div>
-      <div className="overflow-x-auto rounded-[14px] border border-line bg-card/90">
+      <div className="overflow-x-auto rounded-[14px] border border-line bg-card">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="text-xs tracking-wide text-muted uppercase">
             <tr>

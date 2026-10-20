@@ -78,7 +78,7 @@ async function Tracker({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </div>
 
-      <section className="rounded-[14px] border border-line bg-card/90 p-4">
+      <section className="rounded-[14px] border border-line bg-card p-4">
         <h3 className="text-sm font-medium text-foreground">Tag</h3>
         <div className="mt-3">
           <CopySnippet code={trackerSnippet(origin, tracker.publicKey)} />

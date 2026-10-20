@@ -9,7 +9,7 @@ const initialState: AuthState = {};
 const initialAccountState: AuthState & { name?: string; email?: string } = {};
 
 const cardClass =
-  "rounded-[14px] border border-line bg-card/90 p-5 shadow-[0_16px_40px_rgba(0,0,0,0.18)] backdrop-blur-md";
+  "rounded-[14px] border border-line bg-card p-5";
 
 export function AccountForms({ name, email }: { name: string; email: string }) {
   return (

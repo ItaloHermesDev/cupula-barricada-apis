@@ -100,7 +100,7 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </div>
 
-      <section className="rounded-[14px] border border-line bg-card/90 p-5">
+      <section className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Verificação de rotina</h2>
         <p className="mt-2 text-sm text-muted">
           {current.healthEnabled
@@ -132,7 +132,7 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
         </form>
       </section>
 
-      <section className="rounded-[14px] border border-line bg-card/90 p-5">
+      <section className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Como chamar</h2>
         <p className="mt-2 text-sm text-muted">Copie o prompt e cole no chat. Ele manda guardar o token numa variável de ambiente e usar essa variável na requisição.</p>
         {linked.length > 0 ? (
@@ -150,7 +150,7 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </section>
 
-      <section className="rounded-[14px] border border-line bg-card/90 p-5">
+      <section className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Token</h2>
         {token ? (
           <p className="mt-3 break-all font-mono text-sm text-foreground">{token}</p>
@@ -162,7 +162,7 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </section>
 
-      <section className="rounded-[14px] border border-line bg-card/90 p-5">
+      <section className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Uso por rota</h2>
         <p className="mt-2 text-sm text-muted">Tokens no mês e requisições por minuto são anotações para comparar. Não limitam a chamada.</p>
         <ul className="mt-4 flex flex-col gap-3">

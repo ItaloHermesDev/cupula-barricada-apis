@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { ApiCompareCharts } from "@/app/components/catalog/api-compare";
 import { PageFallback } from "@/app/components/dashboard-shell";
+import { Icon, type IconName } from "@/app/components/icons";
 import { dayKey, formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
 import { performanceReport, type BarricadeSpend } from "@/lib/stats";
@@ -40,10 +41,10 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
 
   return (
     <div className="flex flex-col gap-5">
-      <form action="/painel" className="grid gap-3 rounded-[18px] border border-line bg-card/90 p-4 md:grid-cols-[minmax(0,1.4fr)_160px_160px_auto] md:items-end">
+      <form action="/painel" className="grid gap-3 rounded-[14px] border border-line bg-card p-4 md:grid-cols-[minmax(0,1.4fr)_160px_160px_auto] md:items-end">
         <label className="block">
           <span className="mb-1 block text-xs text-muted">Barricada</span>
-          <select name="barricada" defaultValue={report.focusedId ?? ""} className="w-full rounded-[12px] border border-line bg-background px-3 py-2 text-sm">
+          <select name="barricada" defaultValue={report.focusedId ?? ""} className={controlClass}>
             <option value="">Todas as barricadas</option>
             {report.barricades.map((item) => (
               <option key={item.id} value={item.id}>{item.name}</option>
@@ -52,13 +53,13 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         </label>
         <label className="block">
           <span className="mb-1 block text-xs text-muted">De</span>
-          <input type="date" name="de" defaultValue={report.from} max={report.today} className="w-full rounded-[12px] border border-line bg-background px-3 py-2 text-sm" />
+          <input type="date" name="de" defaultValue={report.from} max={report.today} className={controlClass} />
         </label>
         <label className="block">
           <span className="mb-1 block text-xs text-muted">Até</span>
-          <input type="date" name="ate" defaultValue={report.to} max={report.today} className="w-full rounded-[12px] border border-line bg-background px-3 py-2 text-sm" />
+          <input type="date" name="ate" defaultValue={report.to} max={report.today} className={controlClass} />
         </label>
-        <button type="submit" className="rounded-full bg-gradient-to-r from-[#7A45FF] to-[#D24BFF] px-4 py-2 text-sm font-medium text-white">Filtrar</button>
+        <button type="submit" className="rounded-[12px] bg-accent px-4 py-2 text-sm font-medium text-accent-foreground">Filtrar</button>
       </form>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <PeriodLink href={panelHref(report.focusedId, report.today, report.today)} active={report.from === report.today && report.to === report.today}>Hoje</PeriodLink>
@@ -66,8 +67,10 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         <PeriodLink href={panelHref(report.focusedId, fortnight, report.today)} active={report.from === fortnight && report.to === report.today}>14 dias</PeriodLink>
         <p className="text-muted">{report.focusedName ?? "Todas as barricadas"} · {period}</p>
       </div>
-      <section className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric
+          icon="activity"
+          tone="accent"
           label={report.singleDay ? "Cota do dia" : "Uso real"}
           value={report.singleDay ? (report.quotaPct == null ? String(report.real) : `${report.quotaPct}%`) : String(report.real)}
           hint={
@@ -79,25 +82,27 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
                 ? `Limite diário ${report.quotaLimit} · maior dia ${report.peak}`
                 : "Soma das barricadas no período"
           }
-          tone="accent"
         />
         <Metric
+          icon="reports"
+          tone="danger"
           label="Gasto na API"
           value={String(report.upstream)}
           hint={`${report.real} uso real · ${report.checks} verificações`}
-          tone="violet"
         />
         <Metric
+          icon="analytics"
+          tone="warning"
           label="Assinaturas"
           value={report.subscriptionSpend == null ? "—" : money(report.subscriptionSpend)}
           hint={report.focusedName ? "Gasto desta barricada no período" : "Soma das rotas com valor e tokens no período"}
-          tone="accent"
         />
         <Metric
+          icon="monitor"
+          tone="success"
           label={report.singleDay ? "Sucesso do dia" : "Sucesso no período"}
           value={report.successRate == null ? "—" : `${report.successRate}%`}
           hint={report.calls > 0 ? `${report.success} de ${report.calls} chamadas reais · ${report.fallback} fallback` : "Nenhuma chamada real no período"}
-          tone="success"
         />
       </section>
 
@@ -106,7 +111,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         <ErrorChart items={report.barricades} period={period} focusedId={report.focusedId} />
       </section>
 
-      <article className="rounded-[18px] border border-line bg-card/90 p-5">
+      <article className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">O que conta como gasto</h2>
         <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <SpendLine label="Uso real" value={report.real} detail="Entra na cota e chama a API." />
@@ -118,7 +123,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
 
       <ApiCompareCharts apis={report.apis} period={period} />
 
-      <article className="overflow-hidden rounded-[18px] border border-line bg-card/90">
+      <article className="overflow-hidden rounded-[14px] border border-line bg-card">
         <div className="px-5 py-4">
           <h2 className="text-sm font-medium">Gasto por assinatura</h2>
           <p className="mt-1 text-xs text-muted">
@@ -158,7 +163,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         )}
       </article>
 
-      <article className="overflow-hidden rounded-[18px] border border-line bg-card/90">
+      <article className="overflow-hidden rounded-[14px] border border-line bg-card">
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <h2 className="text-sm font-medium">Por barricada</h2>
           <Link href="/barricadas" className="text-sm text-accent">Abrir barricadas</Link>
@@ -190,7 +195,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         )}
       </article>
 
-      <article className="rounded-[18px] border border-line bg-card/90 p-5">
+      <article className="rounded-[14px] border border-line bg-card p-5">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium">Falhas no período</h2>
           <Link href={historyHref(report.focusedId, report.from, report.to)} className="text-sm text-accent">Abrir histórico</Link>
@@ -212,17 +217,38 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
   );
 }
 
-function Metric({ label, value, hint, tone }: { label: string; value: string; hint: string; tone: "accent" | "violet" | "success" | "warning" }) {
-  const glow = {
-    accent: "shadow-[0_0_24px_rgba(0,229,255,0.08)]",
-    violet: "shadow-[0_0_24px_rgba(155,92,255,0.12)]",
-    success: "shadow-[0_0_24px_rgba(0,229,160,0.08)]",
-    warning: "shadow-[0_0_24px_rgba(255,181,71,0.08)]",
+const controlClass =
+  "w-full rounded-[12px] border border-line bg-field px-3 py-2 text-sm text-foreground outline-none focus:border-accent";
+
+function Metric({
+  icon,
+  tone,
+  label,
+  value,
+  hint,
+}: {
+  icon: IconName;
+  tone: "accent" | "success" | "warning" | "danger";
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  const toneClass = {
+    accent: "text-accent",
+    success: "text-success",
+    warning: "text-warning",
+    danger: "text-danger",
   }[tone];
+
   return (
-    <article className={`kpi-card rounded-[18px] border border-line bg-card/90 p-4 ${glow}`}>
-      <p className="text-xs text-muted">{label}</p>
-      <p className="glow-value mt-2 text-2xl font-semibold">{value}</p>
+    <article className="kpi-card rounded-[14px] border border-line bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted">{label}</p>
+        <span className={`inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line bg-field ${toneClass}`}>
+          <Icon name={icon} />
+        </span>
+      </div>
+      <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
       <p className="mt-2 text-xs leading-5 text-muted">{hint}</p>
     </article>
   );
@@ -230,7 +256,7 @@ function Metric({ label, value, hint, tone }: { label: string; value: string; hi
 
 function SpendLine({ label, value, detail }: { label: string; value: number; detail: string }) {
   return (
-    <li className="rounded-[12px] border border-line bg-black/20 px-3 py-2.5">
+    <li className="rounded-[12px] border border-line bg-field px-3 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-foreground">{label}</span>
         <span className="font-medium">{value}</span>
@@ -244,9 +270,17 @@ function SpendChart({ items, period, focusedId }: { items: BarricadeSpend[]; per
   const ranked = [...items].sort((left, right) => (right.spend ?? -1) - (left.spend ?? -1) || left.name.localeCompare(right.name, "pt", { sensitivity: "base" }));
   const peak = Math.max(0, ...ranked.map((item) => item.spend ?? 0));
   return (
-    <article className="min-w-0 overflow-hidden rounded-[18px] border border-line bg-card/90 p-5">
-      <h2 className="text-sm font-medium">Gasto por barricada</h2>
-      <p className="mt-1 text-xs text-muted">Valor da assinatura entre {period}. A coluna maior é a barricada que mais gastou.</p>
+    <article className="min-w-0 overflow-hidden rounded-[14px] border border-line bg-card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">Gasto por barricada</h2>
+          <p className="mt-1 text-xs text-muted">Valor da assinatura entre {period}. A coluna maior é a barricada que mais gastou.</p>
+        </div>
+        <p className="inline-flex items-center gap-2 text-xs text-muted">
+          <span className="h-2 w-2 rounded-full bg-accent" />
+          Valor gasto
+        </p>
+      </div>
       {peak <= 0 ? (
         <p className="mt-4 text-sm text-muted">Nenhuma barricada tem valor mensal e tokens do mês preenchidos.</p>
       ) : (
@@ -278,7 +312,7 @@ function ErrorChart({ items, period, focusedId }: { items: BarricadeSpend[]; per
     return rightRate - leftRate || left.name.localeCompare(right.name, "pt", { sensitivity: "base" });
   });
   return (
-    <article className="min-w-0 overflow-hidden rounded-[18px] border border-line bg-card/90 p-5">
+    <article className="min-w-0 overflow-hidden rounded-[14px] border border-line bg-card p-5">
       <h2 className="text-sm font-medium">Taxa de erro por barricada</h2>
       <p className="mt-1 text-xs text-muted">Falhas entre as chamadas reais de {period}. A escala vai até 100%.</p>
       <ColumnChart
@@ -319,7 +353,10 @@ function ColumnChart({
   return (
     <div className="mt-4 w-full overflow-x-auto">
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block max-w-none" role="img" aria-label={label}>
-        <line x1="0" x2={width} y1={baseline} y2={baseline} stroke="rgba(135,149,170,0.28)" />
+        {[0, 0.5, 1].map((step) => {
+          const y = baseline - step * innerH;
+          return <line key={step} x1="8" x2={width - 8} y1={y} y2={y} stroke="var(--line)" />;
+        })}
         {columns.map((column, index) => {
           const x = index * slot + 16;
           const barW = 28;
@@ -414,7 +451,7 @@ function BarricadeRow({
 
 function PeriodLink({ href, active, children }: { href: string; active: boolean; children: string }) {
   return (
-    <Link href={href} className={`rounded-full border px-3 py-1 ${active ? "border-accent/50 bg-accent/10 text-accent" : "border-line text-muted hover:text-foreground"}`} aria-current={active ? "page" : undefined}>
+    <Link href={href} className={`rounded-[10px] border px-3 py-1.5 ${active ? "border-transparent bg-accent text-accent-foreground" : "border-line bg-field text-muted hover:text-foreground"}`} aria-current={active ? "page" : undefined}>
       {children}
     </Link>
   );

@@ -64,7 +64,7 @@ export function ApiBlock({
   const nameOf = (field: string) => `${prefix}${field}`;
 
   return (
-    <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
+    <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card p-5">
       <div className="flex items-start justify-between gap-3">
         <h2 className="text-sm font-medium">{title}</h2>
         {onRemove ? (

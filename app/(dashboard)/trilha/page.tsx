@@ -25,7 +25,7 @@ async function Track({ searchParams }: { searchParams: Promise<Record<string, st
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="rounded-[14px] border border-line bg-card/90 p-4">
+      <section className="rounded-[14px] border border-line bg-card p-4">
         <h2 className="text-base font-semibold text-foreground">Tag da landpage</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
           Crie uma tag, cole na landpage e abra a trilha para ver as sessões, as páginas e os botões clicados.
@@ -58,7 +58,7 @@ async function Track({ searchParams }: { searchParams: Promise<Record<string, st
       ) : (
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
           {trackers.map((tracker) => (
-            <article key={tracker.id} className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-line bg-card/90 p-3">
+            <article key={tracker.id} className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-line bg-card p-3">
               <h2 className="truncate text-sm font-semibold text-foreground" title={tracker.name}>{tracker.name}</h2>
               <p className="text-xs text-muted">
                 {tracker.sessions === 1 ? "1 sessão" : `${tracker.sessions} sessões`}

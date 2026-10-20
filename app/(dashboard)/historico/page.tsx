@@ -43,7 +43,7 @@ async function History({ searchParams }: { searchParams: Promise<Record<string, 
 
   return (
     <div className="flex flex-col gap-4">
-      <form className="grid gap-3 rounded-[14px] border border-line bg-card/90 p-4 md:grid-cols-3 xl:grid-cols-6">
+      <form className="grid gap-3 rounded-[14px] border border-line bg-card p-4 md:grid-cols-3 xl:grid-cols-6">
         <select name="api" defaultValue={read("api")} className="rounded-[12px] border border-line bg-background px-3 py-2 text-sm">
           <option value="">Todas as APIs</option>
           {apis.map((api) => <option key={api.id} value={api.id}>{api.name}</option>)}
@@ -70,7 +70,7 @@ async function History({ searchParams }: { searchParams: Promise<Record<string, 
           Filtrar
         </button>
       </form>
-      <div className="overflow-x-auto rounded-[14px] border border-line bg-card/90">
+      <div className="overflow-x-auto rounded-[14px] border border-line bg-card">
         <table className="w-full min-w-[880px] text-left text-sm">
           <thead className="text-xs tracking-wide text-muted uppercase">
             <tr>

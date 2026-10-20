@@ -89,7 +89,7 @@ export function SimpleBarricadeForm({
       ) : null}
 
       <div key={seen} className="flex flex-col gap-5">
-      <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
+      <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Barricada</h2>
         <label className="text-sm text-foreground">
           Nome
@@ -146,7 +146,7 @@ export function SimpleBarricadeForm({
           </button>
           <p className="mt-1 text-xs text-muted">Até 5 APIs além da primeira. Quem chama continua usando um único endereço e um único token.</p>
         </div>
-      <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card/90 p-5">
+      <section className="flex flex-col gap-4 rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Quem pode chamar</h2>
         <label className="text-sm text-foreground">
           URL da barricada

@@ -21,7 +21,7 @@ export function UsersManager({ users }: { users: ManagedUser[] }) {
 
   return (
     <>
-      <section className="overflow-hidden rounded-[14px] border border-line bg-card/90 shadow-[0_16px_40px_rgba(0,0,0,0.18)] backdrop-blur-md">
+      <section className="overflow-hidden rounded-[14px] border border-line bg-card">
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
           <div>
             <p className="text-sm font-medium text-foreground">Contas com acesso</p>

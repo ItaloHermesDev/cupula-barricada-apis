@@ -5,7 +5,7 @@ const COLORS = ["var(--accent)", "var(--violet)", "var(--success)", "var(--warni
 export function ApiCompareCharts({ apis, period }: { apis: ApiCompare[]; period: string }) {
   if (apis.length === 0) {
     return (
-      <section className="rounded-[18px] border border-line bg-card/90 p-5">
+      <section className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Consumo entre as APIs</h2>
         <p className="mt-3 text-sm text-muted">Cadastre uma API para comparar o consumo.</p>
       </section>
@@ -15,13 +15,13 @@ export function ApiCompareCharts({ apis, period }: { apis: ApiCompare[]; period:
   const showTrend = apis.some((api) => api.series.length > 1);
   return (
     <section className={`grid min-w-0 gap-4 ${showTrend ? "lg:grid-cols-2" : ""}`}>
-      <article className="min-w-0 overflow-hidden rounded-[18px] border border-line bg-card/90 p-5">
+      <article className="min-w-0 overflow-hidden rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Consumo entre as APIs</h2>
         <p className="mt-1 text-xs text-muted">Chamadas no período {period}. A coluna maior é a API que mais consumiu. A coluna clara é a verificação.</p>
         <ApiRank apis={apis} />
       </article>
       {showTrend ? (
-        <article className="rounded-[18px] border border-line bg-card/90 p-5">
+        <article className="rounded-[14px] border border-line bg-card p-5">
           <h2 className="text-sm font-medium">Uso real por dia</h2>
           <p className="mt-1 text-xs text-muted">Cada cor é uma API. A altura é o número de chamadas reais naquele dia.</p>
           <ApiTrend apis={apis} />
@@ -96,7 +96,7 @@ function ApiTrend({ apis }: { apis: ApiCompare[] }) {
       <svg viewBox={`0 0 ${width} ${height}`} className="h-56 w-full" role="img" aria-label={trendLabel(apis)}>
         {ticks.map((tick) => (
           <g key={tick}>
-            <line x1={pad.left} x2={width - pad.right} y1={yAt(tick)} y2={yAt(tick)} stroke="rgba(135,149,170,0.25)" />
+            <line x1={pad.left} x2={width - pad.right} y1={yAt(tick)} y2={yAt(tick)} stroke="var(--line)" />
             <text x={pad.left - 8} y={yAt(tick) + 4} textAnchor="end" fill="var(--muted)" fontSize="11">{tick}</text>
           </g>
         ))}

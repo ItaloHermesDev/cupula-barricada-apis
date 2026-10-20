@@ -1,5 +1,5 @@
 const fieldClass =
-  "mt-2 w-full rounded-lg border border-line bg-card px-3 py-2.5 text-sm text-foreground outline-none ring-accent/15 placeholder:text-muted focus:border-accent focus:ring-4";
+  "mt-2 w-full rounded-[12px] border border-line bg-field px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent";
 
 export function TextField({
   id,
