@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 export type IconName =
   | "overview"
@@ -15,13 +15,42 @@ export type IconName =
   | "logout"
   | "calendar";
 
-export function Logo({ className = "h-9 w-9" }: { className?: string }) {
+export function Logo({ className = "h-10 w-10" }: { className?: string }) {
+  const id = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const tube = `tube-${id}`;
+  const diamond = `diamond-${id}`;
+  const gem = `gem-${id}`;
+  const bloom = `bloom-${id}`;
+  const hex = "M32 7.5 53.2 19.7v24.6L32 56.5 10.8 44.3V19.7L32 7.5Z";
+
   return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <rect width="32" height="32" rx="9" fill="#101722" stroke="#202C3D" />
-      <path d="M16 6.5 25 11.6v8.8L16 25.5 7 20.4v-8.8L16 6.5Z" fill="none" stroke="#00E5FF" strokeWidth="1.4" />
-      <path d="M16 12.2 20.2 16 16 19.8 11.8 16 16 12.2Z" fill="#3978FF" />
-      <circle cx="16" cy="16" r="1.15" fill="#00E5FF" />
+    <svg viewBox="0 0 64 64" className={`${className} overflow-visible`} aria-hidden="true">
+      <defs>
+        <linearGradient id={tube} x1="32" y1="6" x2="32" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#5ef4ff" />
+          <stop offset="50%" stopColor="#00e5ff" />
+          <stop offset="100%" stopColor="#00c8f2" />
+        </linearGradient>
+        <linearGradient id={diamond} x1="18" y1="18" x2="46" y2="48" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#b7e6ff" />
+          <stop offset="36%" stopColor="#3b82ff" />
+          <stop offset="100%" stopColor="#1236d4" />
+        </linearGradient>
+        <linearGradient id={gem} x1="27" y1="26" x2="38" y2="39" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="55%" stopColor="#e7f7ff" />
+          <stop offset="100%" stopColor="#9fd0ff" />
+        </linearGradient>
+        <filter id={bloom} x="-70%" y="-70%" width="240%" height="240%">
+          <feGaussianBlur stdDeviation="1.8" />
+        </filter>
+      </defs>
+      <path d={hex} fill="none" stroke="#00d6ff" strokeWidth="10.2" strokeLinejoin="miter" opacity="0.5" filter={`url(#${bloom})`} />
+      <path d={hex} fill="none" stroke={`url(#${tube})`} strokeWidth="8.6" strokeLinejoin="miter" />
+      <path d="M32 20.2 44.2 32 32 43.8 19.8 32Z" fill="#07122e" opacity="0.4" transform="translate(0.45 0.7)" />
+      <path d="M32 20.2 44.2 32 32 43.8 19.8 32Z" fill={`url(#${diamond})`} />
+      <path d="M32 20.2 44.2 32 32 32Z" fill="#ffffff" opacity="0.16" />
+      <path d="M32 27.1 36.9 32 32 36.9 27.1 32Z" fill={`url(#${gem})`} />
     </svg>
   );
 }

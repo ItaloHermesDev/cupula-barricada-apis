@@ -15,7 +15,7 @@ export function AuthShell({
       <div className="command-atmosphere pointer-events-none absolute inset-0" />
       <div className="relative w-full max-w-[420px]">
         <div className="mb-8 flex items-center gap-3">
-          <Logo className="h-10 w-10" />
+          <Logo />
           <div>
             <p className="text-sm font-medium text-foreground">Cúpula Barricada</p>
             <p className="text-sm text-muted">Acesso restrito</p>
