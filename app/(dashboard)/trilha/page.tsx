@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { createTrackerAction } from "@/app/actions/track";
+import { createTrackerAction, deleteTrackerAction } from "@/app/actions/track";
+import { DeleteButton } from "@/app/components/catalog/fields";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { requirePage } from "@/lib/dal";
 import { listTrackers } from "@/lib/track";
@@ -47,6 +48,7 @@ async function Track({ searchParams }: { searchParams: Promise<Record<string, st
         </form>
         {error === "nome" ? <p className="mt-3 text-sm text-[#ffb3c0]">Dê um nome com pelo menos 2 letras.</p> : null}
         {error === "salvar" ? <p className="mt-3 text-sm text-[#ffb3c0]">Não foi possível criar a tag agora.</p> : null}
+        {error === "excluir" ? <p className="mt-3 text-sm text-[#ffb3c0]">Não foi possível excluir a tag agora.</p> : null}
       </section>
 
       {trackers.length === 0 ? (
@@ -54,19 +56,27 @@ async function Track({ searchParams }: { searchParams: Promise<Record<string, st
           Nenhuma tag ainda. Crie uma e cole na landpage.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-3">
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
           {trackers.map((tracker) => (
-            <article key={tracker.id} className="flex w-full max-w-xs flex-col gap-2 rounded-[12px] border border-line bg-card/90 p-3">
-              <h2 className="truncate text-sm font-semibold text-foreground">{tracker.name}</h2>
+            <article key={tracker.id} className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-line bg-card/90 p-3">
+              <h2 className="truncate text-sm font-semibold text-foreground" title={tracker.name}>{tracker.name}</h2>
               <p className="text-xs text-muted">
                 {tracker.sessions === 1 ? "1 sessão" : `${tracker.sessions} sessões`}
               </p>
-              <Link
-                href={`/trilha/${tracker.id}`}
-                className="rounded-[10px] bg-accent px-2 py-1.5 text-center text-xs font-medium text-accent-foreground"
-              >
-                Abrir trilha
-              </Link>
+              <div className="mt-auto flex flex-col gap-2">
+                <Link
+                  href={`/trilha/${tracker.id}`}
+                  className="rounded-[10px] bg-accent px-2 py-1.5 text-center text-xs font-medium text-accent-foreground"
+                >
+                  Abrir trilha
+                </Link>
+                <DeleteButton
+                  action={deleteTrackerAction}
+                  id={tracker.id}
+                  message={`Excluir ${tracker.name}? Os acessos desta tag também saem.`}
+                  className="w-full rounded-[10px] border border-danger/40 px-2 py-1.5 text-center text-xs font-medium text-danger"
+                />
+              </div>
             </article>
           ))}
         </div>

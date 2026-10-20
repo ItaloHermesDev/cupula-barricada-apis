@@ -175,22 +175,41 @@ export function pixelSource() {
     return String(text).replace(/\\s+/g, " ").trim().slice(0, 160);
   }
 
+  function stampUrl() {
+    try {
+      var url = new URL(location.href);
+      var sid = sessionId();
+      if (!sid || url.searchParams.get("utm_trilha") === sid) return;
+      url.searchParams.set("utm_trilha", sid);
+      var nativeReplace = root.replace || history.replaceState;
+      nativeReplace.call(history, history.state, "", url);
+    } catch (error) {}
+  }
+
   if (!root.hooked) {
     root.hooked = true;
-    var push = history.pushState;
-    var replace = history.replaceState;
+    root.push = history.pushState;
+    root.replace = history.replaceState;
     history.pushState = function () {
-      var result = push.apply(this, arguments);
+      var result = root.push.apply(this, arguments);
+      stampUrl();
       emitPage();
       return result;
     };
     history.replaceState = function () {
-      var result = replace.apply(this, arguments);
+      var result = root.replace.apply(this, arguments);
+      stampUrl();
       emitPage();
       return result;
     };
-    window.addEventListener("popstate", emitPage);
-    window.addEventListener("hashchange", emitPage);
+    window.addEventListener("popstate", function () {
+      stampUrl();
+      emitPage();
+    });
+    window.addEventListener("hashchange", function () {
+      stampUrl();
+      emitPage();
+    });
     document.addEventListener("click", function (event) {
       var node = buttonOf(event.target);
       if (!node) return;
@@ -202,13 +221,14 @@ export function pixelSource() {
   var sid = sessionId();
   window.CupulaTrilha = window.CupulaTrilha || {};
   window.CupulaTrilha.sessao = function () { return sid; };
+  stampUrl();
   emitPage();
 })();
 `;
 }
 
 export function trackerSnippet(origin: string, publicKey: string) {
-  return `<script async src="${origin}/api/trilha/script" data-chave="${publicKey}"></script>`;
+  return `<!-- Registra a trilha e coloca utm_trilha com o id da sessão na URL. -->\n<script async src="${origin}/api/trilha/script" data-chave="${publicKey}"></script>`;
 }
 
 export function exampleHtml(origin: string, publicKey: string) {

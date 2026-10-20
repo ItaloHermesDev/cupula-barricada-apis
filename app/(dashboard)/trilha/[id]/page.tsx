@@ -83,7 +83,10 @@ async function Tracker({ params }: { params: Promise<{ id: string }> }) {
         <div className="mt-3">
           <CopySnippet code={trackerSnippet(origin, tracker.publicKey)} />
         </div>
-        <p className="mt-3 text-sm text-muted">
+        <p className="mt-3 text-sm leading-6 text-muted">
+          Cole a tag na landpage. Ela registra a visita e acrescenta <span className="text-foreground">utm_trilha</span> com o id da sessão na URL, sem recarregar a página.
+        </p>
+        <p className="mt-2 text-sm text-muted">
           <a className="text-accent underline-offset-2 hover:underline" href={`/api/trilha/exemplo?c=${tracker.publicKey}`} target="_blank" rel="noreferrer">
             Abrir página de teste
           </a>

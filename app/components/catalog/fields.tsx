@@ -106,20 +106,23 @@ export function DeleteButton({
   action,
   id,
   message,
+  className,
 }: {
   action: (formData: FormData) => Promise<void>;
   id: number;
   message: string;
+  className?: string;
 }) {
   return (
     <form
+      className="w-full"
       action={action}
       onSubmit={(event) => {
         if (!window.confirm(message)) event.preventDefault();
       }}
     >
       <input type="hidden" name="id" value={id} />
-      <button type="submit" className="text-sm text-danger">
+      <button type="submit" className={className ?? "text-sm text-danger"}>
         Excluir
       </button>
     </form>

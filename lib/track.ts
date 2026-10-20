@@ -104,6 +104,11 @@ export async function getTracker(id: number) {
   };
 }
 
+export async function deleteTracker(id: number) {
+  if (!Number.isInteger(id) || id <= 0) return;
+  await execute("DELETE FROM trackers WHERE id = ?", [id]);
+}
+
 export async function listTrackers() {
   const rows = await query<TrackerRow[]>(
     `SELECT t.id, t.name, t.public_key, t.created_at,
