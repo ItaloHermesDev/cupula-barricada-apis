@@ -87,6 +87,8 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
           errorRules: current.errorRules,
           monthlyTokens: primaryUsage?.monthlyTokens ?? null,
           requestsPerMinute: primaryUsage?.requestsPerMinute ?? null,
+          subscriptionName: primaryUsage?.subscriptionName ?? "",
+          subscriptionPrice: primaryUsage?.subscriptionPrice ?? null,
           calls: primaryUsage?.calls ?? 0,
           sources,
           fallbackId: current.fallbackId,
@@ -100,7 +102,7 @@ async function EditBarricade({ params }: { params: Promise<{ id: string }> }) {
   );
 }
 
-function apiSlice(api: ApiRecord, responseTemplate: string, errorRules: ApiSlice["errorRules"], usage?: { monthlyTokens: number | null; requestsPerMinute: number | null; calls: number }): ApiSlice {
+function apiSlice(api: ApiRecord, responseTemplate: string, errorRules: ApiSlice["errorRules"], usage?: { monthlyTokens: number | null; requestsPerMinute: number | null; subscriptionName: string | null; subscriptionPrice: number | null; calls: number }): ApiSlice {
   const mode = bodyModeOf(api.requestContentType, api.bodyTemplate);
   const presented = presentApiTarget(api.baseUrl, api.endpointPath);
   return {
@@ -120,6 +122,8 @@ function apiSlice(api: ApiRecord, responseTemplate: string, errorRules: ApiSlice
     errorRules,
     monthlyTokens: usage?.monthlyTokens ?? null,
     requestsPerMinute: usage?.requestsPerMinute ?? null,
+    subscriptionName: usage?.subscriptionName ?? "",
+    subscriptionPrice: usage?.subscriptionPrice ?? null,
     calls: usage?.calls ?? 0,
   };
 }

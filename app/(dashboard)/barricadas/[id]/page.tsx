@@ -78,6 +78,8 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
       calls: stat?.calls ?? 0,
       monthlyTokens: stat?.monthlyTokens ?? null,
       requestsPerMinute: stat?.requestsPerMinute ?? null,
+      subscriptionName: stat?.subscriptionName ?? null,
+      subscriptionPrice: stat?.subscriptionPrice ?? null,
     };
   });
 
@@ -171,6 +173,8 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
                 {route.calls} {route.calls === 1 ? "chamada" : "chamadas"}
                 {" · "}tokens no mês: {route.monthlyTokens ?? "—"}
                 {" · "}por minuto: {route.requestsPerMinute ?? "—"}
+                {route.subscriptionName ? ` · assinatura ${route.subscriptionName}` : ""}
+                {route.subscriptionPrice != null ? ` · ${money(route.subscriptionPrice)} por mês` : ""}
               </span>
             </li>
           ))}
@@ -179,6 +183,10 @@ async function ViewBarricade({ params }: { params: Promise<{ id: string }> }) {
 
     </div>
   );
+}
+
+function money(value: number) {
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 function mergeParameters(groups: CallParameter[][]) {

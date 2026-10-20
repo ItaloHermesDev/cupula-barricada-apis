@@ -40,6 +40,8 @@ export type RouteStat = {
   apiId: number;
   monthlyTokens: number | null;
   requestsPerMinute: number | null;
+  subscriptionName: string | null;
+  subscriptionPrice: number | null;
   calls: number;
 };
 
@@ -47,12 +49,14 @@ interface StatRow extends RowDataPacket {
   api_id: number;
   monthly_tokens: number | null;
   requests_per_minute: number | null;
+  subscription_name: string | null;
+  subscription_price: number | string | null;
   calls: number;
 }
 
 export async function listRouteStats(barricadeId: number) {
   const rows = await query<StatRow[]>(
-    `SELECT api_id, monthly_tokens, requests_per_minute, calls
+    `SELECT api_id, monthly_tokens, requests_per_minute, subscription_name, subscription_price, calls
      FROM barricade_api_stats
      WHERE barricade_id = ?`,
     [barricadeId],
@@ -61,20 +65,23 @@ export async function listRouteStats(barricadeId: number) {
     apiId: row.api_id,
     monthlyTokens: row.monthly_tokens == null ? null : Number(row.monthly_tokens),
     requestsPerMinute: row.requests_per_minute == null ? null : Number(row.requests_per_minute),
+    subscriptionName: row.subscription_name?.trim() || null,
+    subscriptionPrice: row.subscription_price == null ? null : Number(row.subscription_price),
     calls: Number(row.calls ?? 0),
   }));
 }
 
 export async function saveRouteQuotas(
   barricadeId: number,
-  routes: { apiId: number; monthlyTokens: number | null; requestsPerMinute: number | null }[],
+  routes: { apiId: number; monthlyTokens: number | null; requestsPerMinute: number | null; subscriptionName: string | null; subscriptionPrice: number | null }[],
 ) {
   for (const route of routes) {
     await execute(
-      `INSERT INTO barricade_api_stats (barricade_id, api_id, monthly_tokens, requests_per_minute, calls)
-       VALUES (?, ?, ?, ?, 0)
-       ON DUPLICATE KEY UPDATE monthly_tokens = VALUES(monthly_tokens), requests_per_minute = VALUES(requests_per_minute)`,
-      [barricadeId, route.apiId, route.monthlyTokens, route.requestsPerMinute],
+      `INSERT INTO barricade_api_stats (barricade_id, api_id, monthly_tokens, requests_per_minute, subscription_name, subscription_price, calls)
+       VALUES (?, ?, ?, ?, ?, ?, 0)
+       ON DUPLICATE KEY UPDATE monthly_tokens = VALUES(monthly_tokens), requests_per_minute = VALUES(requests_per_minute),
+         subscription_name = VALUES(subscription_name), subscription_price = VALUES(subscription_price)`,
+      [barricadeId, route.apiId, route.monthlyTokens, route.requestsPerMinute, route.subscriptionName, route.subscriptionPrice],
     );
   }
   const ids = routes.map((route) => route.apiId);

@@ -14,14 +14,10 @@ export function ApiCompareCharts({ apis, period }: { apis: ApiCompare[]; period:
 
   const showTrend = apis.some((api) => api.series.length > 1);
   return (
-    <section className={`grid gap-4 ${showTrend ? "lg:grid-cols-2" : ""}`}>
-      <article className="rounded-[18px] border border-line bg-card/90 p-5">
+    <section className={`grid min-w-0 gap-4 ${showTrend ? "lg:grid-cols-2" : ""}`}>
+      <article className="min-w-0 overflow-hidden rounded-[18px] border border-line bg-card/90 p-5">
         <h2 className="text-sm font-medium">Consumo entre as APIs</h2>
-        <p className="mt-1 text-xs text-muted">Chamadas no período {period}. A barra maior é a API que mais consumiu.</p>
-        <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted">
-          <span>Barra colorida: uso real, na cor da API.</span>
-          <span className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-white/40" /> Verificação</span>
-        </div>
+        <p className="mt-1 text-xs text-muted">Chamadas no período {period}. A coluna maior é a API que mais consumiu. A coluna clara é a verificação.</p>
         <ApiRank apis={apis} />
       </article>
       {showTrend ? (
@@ -37,27 +33,47 @@ export function ApiCompareCharts({ apis, period }: { apis: ApiCompare[]; period:
 
 function ApiRank({ apis }: { apis: ApiCompare[] }) {
   const peak = Math.max(1, ...apis.flatMap((api) => [api.real, api.checks]));
+  const slot = 86;
+  const width = Math.max(apis.length * slot + 28, slot);
+  const height = 268;
+  const pad = { top: 22, bottom: 136 };
+  const innerH = height - pad.top - pad.bottom;
+  const baseline = pad.top + innerH;
   return (
-    <ul className="mt-4 flex flex-col gap-4">
-      {apis.map((api, index) => (
-        <li key={api.id}>
-          <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="flex min-w-0 items-center gap-2">
-              <i className="h-2 w-2 shrink-0 rounded-full" style={{ background: COLORS[index % COLORS.length] }} />
-              <span className="truncate text-foreground" title={api.name}>{api.name}</span>
-            </span>
-            <span className="shrink-0 text-xs text-muted">{api.real} uso real · {api.checks} verificações</span>
-          </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10" role="img" aria-label={`${api.name}: ${api.real} chamadas reais, ${api.checks} verificações`}>
-            <div className="h-full rounded-full" style={{ width: share(api.real, peak), background: COLORS[index % COLORS.length] }} />
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full bg-white/40" style={{ width: share(api.checks, peak) }} />
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className="mt-4 w-full overflow-x-auto">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block max-w-none" role="img" aria-label="Consumo entre as APIs">
+        <line x1="0" x2={width} y1={baseline} y2={baseline} stroke="rgba(135,149,170,0.28)" />
+        {apis.map((api, index) => {
+          const x = index * slot + 14;
+          const realH = api.real <= 0 ? 0 : Math.max(4, (api.real / peak) * innerH);
+          const checkH = api.checks <= 0 ? 0 : Math.max(4, (api.checks / peak) * innerH);
+          const labelX = x + 18;
+          const labelY = baseline + 16;
+          return (
+            <g key={api.id}>
+              <text x={labelX} y={baseline - Math.max(realH, checkH) - 6} textAnchor="middle" fill="var(--muted)" fontSize="10">{api.real}</text>
+              <rect x={x} y={baseline - realH} width="18" height={realH} rx="4" fill={COLORS[index % COLORS.length]}>
+                <title>{`${api.name}: ${api.real} uso real, ${api.checks} verificações`}</title>
+              </rect>
+              <rect x={x + 22} y={baseline - checkH} width="14" height={checkH} rx="4" fill="rgba(240,245,255,0.38)">
+                <title>{`${api.name}: ${api.checks} verificações`}</title>
+              </rect>
+              <text x={labelX} y={labelY} fill="var(--muted)" fontSize="11" transform={`rotate(58 ${labelX} ${labelY})`}>
+                {axisLabel(api.name)}
+                <title>{api.name}</title>
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
+}
+
+function axisLabel(name: string) {
+  const split = name.split(" · ");
+  const label = split.length === 1 ? name : `${split[0].split(" ")[0]} · ${split.slice(1).join(" · ")}`;
+  return label.length > 18 ? `${label.slice(0, 17)}…` : label;
 }
 
 function ApiTrend({ apis }: { apis: ApiCompare[] }) {
@@ -124,11 +140,6 @@ function ApiTrend({ apis }: { apis: ApiCompare[] }) {
       </ul>
     </div>
   );
-}
-
-function share(value: number, peak: number) {
-  if (value <= 0) return "0%";
-  return `${Math.max(4, Math.round((value / peak) * 100))}%`;
 }
 
 function trendLabel(apis: ApiCompare[]) {

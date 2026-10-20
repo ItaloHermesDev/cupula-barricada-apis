@@ -5,7 +5,7 @@ import { ApiCompareCharts } from "@/app/components/catalog/api-compare";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { dayKey, formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
-import { performanceReport, type BarricadeSpend, type DaySpend } from "@/lib/stats";
+import { performanceReport, type BarricadeSpend } from "@/lib/stats";
 
 export const metadata: Metadata = { title: "Painel" };
 
@@ -66,7 +66,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         <PeriodLink href={panelHref(report.focusedId, fortnight, report.today)} active={report.from === fortnight && report.to === report.today}>14 dias</PeriodLink>
         <p className="text-muted">{report.focusedName ?? "Todas as barricadas"} · {period}</p>
       </div>
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
         <Metric
           label={report.singleDay ? "Cota do dia" : "Uso real"}
           value={report.singleDay ? (report.quotaPct == null ? String(report.real) : `${report.quotaPct}%`) : String(report.real)}
@@ -88,53 +88,75 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           tone="violet"
         />
         <Metric
+          label="Assinaturas"
+          value={report.subscriptionSpend == null ? "—" : money(report.subscriptionSpend)}
+          hint={report.focusedName ? "Gasto desta barricada no período" : "Soma das rotas com valor e tokens no período"}
+          tone="accent"
+        />
+        <Metric
           label={report.singleDay ? "Sucesso do dia" : "Sucesso no período"}
           value={report.successRate == null ? "—" : `${report.successRate}%`}
           hint={report.calls > 0 ? `${report.success} de ${report.calls} chamadas reais · ${report.fallback} fallback` : "Nenhuma chamada real no período"}
           tone="success"
         />
-        <Metric
-          label="Resposta"
-          value={report.latency == null ? "—" : `${report.latency} ms`}
-          hint={
-            report.latency == null
-              ? "Sem amostra de tempo no período"
-              : report.samples < 5
-                ? `${report.samples} ${report.samples === 1 ? "chamada real medida" : "chamadas reais medidas"}`
-                : `95% das chamadas reais até ${report.p95} ms`
-          }
-          tone="warning"
-        />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(260px,0.8fr)]">
-        <article className="rounded-[18px] border border-line bg-card/90 p-5">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-medium">{report.focusedName ?? "Todas as barricadas"}</h2>
-              <p className="mt-1 text-xs text-muted">
-                {report.periodReal} uso real · {report.periodChecks} verificações
-              </p>
-            </div>
-            <div className="flex gap-3 text-xs text-muted">
-              <span className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-accent" /> Uso real</span>
-              <span className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full bg-violet" /> Verificação</span>
-            </div>
-          </div>
-          <UsageChart days={report.series} />
-        </article>
-        <article className="rounded-[18px] border border-line bg-card/90 p-5">
-          <h2 className="text-sm font-medium">O que conta como gasto</h2>
-          <ul className="mt-4 space-y-3 text-sm">
-            <SpendLine label="Uso real" value={report.real} detail="Entra na cota e chama a API." />
-            <SpendLine label="Verificação" value={report.checks} detail="Chama a API e não entra na cota." />
-            <SpendLine label="Rejeitada" value={report.rejected} detail="Não chama a API." />
-            <SpendLine label="Fallback" value={report.fallback} detail="A alternativa também consome a cota dela." />
-          </ul>
-        </article>
+      <section className="grid min-w-0 gap-4">
+        <SpendChart items={report.barricades} period={period} focusedId={report.focusedId} />
+        <ErrorChart items={report.barricades} period={period} focusedId={report.focusedId} />
       </section>
+
+      <article className="rounded-[18px] border border-line bg-card/90 p-5">
+        <h2 className="text-sm font-medium">O que conta como gasto</h2>
+        <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <SpendLine label="Uso real" value={report.real} detail="Entra na cota e chama a API." />
+          <SpendLine label="Verificação" value={report.checks} detail="Chama a API e não entra na cota." />
+          <SpendLine label="Rejeitada" value={report.rejected} detail="Não chama a API." />
+          <SpendLine label="Fallback" value={report.fallback} detail="A alternativa também consome a cota dela." />
+        </ul>
+      </article>
 
       <ApiCompareCharts apis={report.apis} period={period} />
+
+      <article className="overflow-hidden rounded-[18px] border border-line bg-card/90">
+        <div className="px-5 py-4">
+          <h2 className="text-sm font-medium">Gasto por assinatura</h2>
+          <p className="mt-1 text-xs text-muted">
+            Valor mensal ÷ tokens do mês × chamadas reais da rota entre {period}. O mesmo nome soma rotas de barricadas diferentes.
+          </p>
+        </div>
+        {report.subscriptions.length === 0 ? (
+          <p className="px-5 pb-5 text-sm text-muted">Nenhuma rota tem nome, valor mensal e tokens do mês preenchidos.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="text-xs text-muted">
+                <tr className="border-t border-line">
+                  <th className="px-5 py-3 font-medium">Assinatura</th>
+                  <th className="px-3 py-3 font-medium">Valor mensal</th>
+                  <th className="px-3 py-3 font-medium">Tokens do mês</th>
+                  <th className="px-3 py-3 font-medium">Chamadas</th>
+                  <th className="px-5 py-3 font-medium">Gasto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.subscriptions.map((item) => (
+                  <tr key={item.name} className="border-t border-line">
+                    <td className="px-5 py-3">
+                      <p className="font-medium text-foreground">{item.name}</p>
+                      <p className="mt-1 text-xs text-muted">{item.routes.map((route) => `${route.barricadeName} · ${route.apiName} · ${route.calls}`).join(" · ")}</p>
+                    </td>
+                    <td className="px-3 py-3">{item.mixedPrice ? "valores diferentes" : item.price == null ? "—" : money(item.price)}</td>
+                    <td className="px-3 py-3">{item.mixedTokens ? "cotas diferentes" : item.tokens ?? "—"}</td>
+                    <td className="px-3 py-3">{item.calls}</td>
+                    <td className="px-5 py-3">{money(item.spend)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
 
       <article className="overflow-hidden rounded-[18px] border border-line bg-card/90">
         <div className="flex items-center justify-between gap-3 px-5 py-4">
@@ -145,7 +167,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           <p className="px-5 pb-5 text-sm text-muted">Cadastre uma barricada para acompanhar desempenho e gasto.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="text-xs text-muted">
                 <tr className="border-t border-line">
                   <th className="px-5 py-3 font-medium">Barricada</th>
@@ -154,6 +176,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
                   <th className="px-3 py-3 font-medium">Verificações</th>
                   <th className="px-3 py-3 font-medium">Resposta</th>
                   <th className="px-3 py-3 font-medium">Sucesso</th>
+                  <th className="px-3 py-3 font-medium">Gasto</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                 </tr>
               </thead>
@@ -217,31 +240,121 @@ function SpendLine({ label, value, detail }: { label: string; value: number; det
   );
 }
 
-function UsageChart({ days }: { days: DaySpend[] }) {
-  const peak = Math.max(1, ...days.flatMap((day) => [day.real, day.checks]));
-  const step = days.length > 20 ? Math.ceil(days.length / 10) : 1;
+function SpendChart({ items, period, focusedId }: { items: BarricadeSpend[]; period: string; focusedId: number | null }) {
+  const ranked = [...items].sort((left, right) => (right.spend ?? -1) - (left.spend ?? -1) || left.name.localeCompare(right.name, "pt", { sensitivity: "base" }));
+  const peak = Math.max(0, ...ranked.map((item) => item.spend ?? 0));
   return (
-    <div className="mt-5 flex items-end gap-1 sm:gap-1.5">
-      {days.map((day, index) => (
-        <div key={day.day} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-          <div
-            className="flex h-32 w-full items-end justify-center gap-0.5"
-            role="img"
-            aria-label={`${day.label}: ${day.real} uso real, ${day.checks} verificações`}
-          >
-            <span className="w-[42%] rounded-t-[4px] bg-accent" style={{ height: barHeight(day.real, peak) }} />
-            <span className="w-[42%] rounded-t-[4px] bg-violet" style={{ height: barHeight(day.checks, peak) }} />
-          </div>
-          <span className="text-[10px] text-muted">{index % step === 0 || index === days.length - 1 ? day.label : ""}</span>
-        </div>
-      ))}
+    <article className="min-w-0 overflow-hidden rounded-[18px] border border-line bg-card/90 p-5">
+      <h2 className="text-sm font-medium">Gasto por barricada</h2>
+      <p className="mt-1 text-xs text-muted">Valor da assinatura entre {period}. A coluna maior é a barricada que mais gastou.</p>
+      {peak <= 0 ? (
+        <p className="mt-4 text-sm text-muted">Nenhuma barricada tem valor mensal e tokens do mês preenchidos.</p>
+      ) : (
+        <ColumnChart
+          label="Gasto por barricada"
+          peak={peak}
+          columns={ranked.map((item) => ({
+            id: item.id,
+            name: item.name,
+            value: item.spend ?? 0,
+            caption: item.spend == null ? "—" : money(item.spend),
+            detail: item.spend == null ? `${item.name}: sem valor de assinatura` : `${item.name}: ${money(item.spend)}`,
+            color: "var(--accent)",
+            focused: item.id === focusedId,
+          }))}
+        />
+      )}
+    </article>
+  );
+}
+
+function ErrorChart({ items, period, focusedId }: { items: BarricadeSpend[]; period: string; focusedId: number | null }) {
+  const ranked = [...items].sort((left, right) => {
+    const leftRate = errorRate(left);
+    const rightRate = errorRate(right);
+    if (leftRate == null && rightRate == null) return left.name.localeCompare(right.name, "pt", { sensitivity: "base" });
+    if (leftRate == null) return 1;
+    if (rightRate == null) return -1;
+    return rightRate - leftRate || left.name.localeCompare(right.name, "pt", { sensitivity: "base" });
+  });
+  return (
+    <article className="min-w-0 overflow-hidden rounded-[18px] border border-line bg-card/90 p-5">
+      <h2 className="text-sm font-medium">Taxa de erro por barricada</h2>
+      <p className="mt-1 text-xs text-muted">Falhas entre as chamadas reais de {period}. A escala vai até 100%.</p>
+      <ColumnChart
+        label="Taxa de erro por barricada"
+        peak={100}
+        columns={ranked.map((item) => {
+          const rate = errorRate(item);
+          return {
+            id: item.id,
+            name: item.name,
+            value: rate ?? 0,
+            caption: rate == null ? "—" : `${rate}%`,
+            detail: rate == null ? `${item.name}: sem chamadas reais` : `${item.name}: ${rate}% · ${item.calls - item.success} de ${item.calls}`,
+            color: rate == null ? "rgba(135,149,170,0.35)" : rate >= 20 ? "var(--danger)" : rate > 0 ? "var(--warning)" : "var(--success)",
+            focused: item.id === focusedId,
+          };
+        })}
+      />
+    </article>
+  );
+}
+
+function ColumnChart({
+  label,
+  peak,
+  columns,
+}: {
+  label: string;
+  peak: number;
+  columns: { id: number; name: string; value: number; caption: string; detail: string; color: string; focused: boolean }[];
+}) {
+  const slot = 86;
+  const width = Math.max(columns.length * slot + 28, slot);
+  const height = 268;
+  const pad = { top: 22, bottom: 136 };
+  const innerH = height - pad.top - pad.bottom;
+  const baseline = pad.top + innerH;
+  return (
+    <div className="mt-4 w-full overflow-x-auto">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block max-w-none" role="img" aria-label={label}>
+        <line x1="0" x2={width} y1={baseline} y2={baseline} stroke="rgba(135,149,170,0.28)" />
+        {columns.map((column, index) => {
+          const x = index * slot + 16;
+          const barW = 28;
+          const ratio = peak > 0 ? Math.min(1, Math.max(0, column.value / peak)) : 0;
+          const barH = ratio <= 0 ? 0 : Math.max(4, ratio * innerH);
+          const y = baseline - barH;
+          const labelX = x + barW / 2;
+          const labelY = baseline + 16;
+          return (
+            <g key={column.id}>
+              <text x={labelX} y={y - 6} textAnchor="middle" fill="var(--muted)" fontSize="10">{column.caption}</text>
+              <rect x={x} y={y} width={barW} height={barH} rx="4" fill={column.color} stroke={column.focused ? "var(--foreground)" : "none"} strokeWidth="1.5">
+                <title>{column.detail}</title>
+              </rect>
+              <text x={labelX} y={labelY} fill={column.focused ? "var(--accent)" : "var(--muted)"} fontSize="11" transform={`rotate(58 ${labelX} ${labelY})`}>
+                {axisLabel(column.name)}
+                <title>{column.name}</title>
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }
 
-function barHeight(value: number, peak: number) {
-  if (value <= 0) return "0%";
-  return `${Math.max(8, Math.round((value / peak) * 100))}%`;
+function axisLabel(name: string) {
+  const split = name.split(" · ");
+  const label = split.length === 1 ? name : `${split[0].split(" ")[0]} · ${split.slice(1).join(" · ")}`;
+  return label.length > 18 ? `${label.slice(0, 17)}…` : label;
+}
+
+function errorRate(item: BarricadeSpend) {
+  if (item.calls <= 0) return null;
+  return Math.round(((item.calls - item.success) / item.calls) * 1000) / 10;
 }
 
 function BarricadeRow({
@@ -288,6 +401,7 @@ function BarricadeRow({
       <td className="px-3 py-3 text-muted">{item.checks}</td>
       <td className="px-3 py-3">{item.latencyMs == null ? "—" : `${item.latencyMs} ms`}</td>
       <td className="px-3 py-3">{rate}</td>
+      <td className="px-3 py-3">{item.spend == null ? "—" : money(item.spend)}</td>
       <td className="px-5 py-3">
         <span className="inline-flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${status.dot}`} />
@@ -304,6 +418,11 @@ function PeriodLink({ href, active, children }: { href: string; active: boolean;
       {children}
     </Link>
   );
+}
+
+function money(value: number) {
+  const digits = value !== 0 && Math.abs(value) < 0.01 ? 4 : 2;
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: digits });
 }
 
 function panelHref(barricadeId: number | null, from: string, to: string) {

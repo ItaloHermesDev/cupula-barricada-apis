@@ -23,6 +23,8 @@ export type ApiSlice = {
   errorRules: ErrorRule[];
   monthlyTokens: number | null;
   requestsPerMinute: number | null;
+  subscriptionName: string;
+  subscriptionPrice: number | null;
   calls: number;
 };
 
@@ -81,8 +83,16 @@ export function ApiBlock({
           Requisições por minuto
           <input name={nameOf("requests_per_minute")} type="number" min={0} defaultValue={draft.requestsPerMinute ?? ""} className={fieldClass} />
         </label>
+        <label className="text-sm text-foreground">
+          Assinatura
+          <input name={nameOf("subscription_name")} defaultValue={draft.subscriptionName} maxLength={120} placeholder="Plano RapidAPI" className={fieldClass} />
+        </label>
+        <label className="text-sm text-foreground">
+          Valor mensal
+          <input name={nameOf("subscription_price")} type="number" min={0} step="0.01" defaultValue={draft.subscriptionPrice ?? ""} className={fieldClass} />
+        </label>
       </div>
-      <p className="text-xs text-muted">Esses números só servem para comparar. Não limitam a chamada. Chamadas desta rota: {draft.calls}.</p>
+      <p className="text-xs text-muted">Tokens no mês e requisições por minuto só comparam. Não limitam a chamada. O gasto é o valor mensal dividido pelos tokens do mês e multiplicado pelas chamadas do período no painel. Rotas com o mesmo nome de assinatura somam o gasto, mesmo em barricadas diferentes. Chamadas desta rota: {draft.calls}.</p>
       {prefix ? <input type="hidden" name="source_index" value={pingSource} /> : null}
       {draft.apiId ? <input type="hidden" name={nameOf("api_id")} value={draft.apiId} /> : null}
       <input type="hidden" name={nameOf("response_template")} value={template} />
@@ -377,6 +387,8 @@ export function emptyApiSlice(method: HttpMethod = "GET"): ApiSlice {
     errorRules: [],
     monthlyTokens: null,
     requestsPerMinute: null,
+    subscriptionName: "",
+    subscriptionPrice: null,
     calls: 0,
   };
 }

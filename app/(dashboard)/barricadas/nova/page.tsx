@@ -46,6 +46,8 @@ async function NewBarricade() {
         errorRules: [],
         monthlyTokens: null,
         requestsPerMinute: null,
+        subscriptionName: "",
+        subscriptionPrice: null,
         calls: 0,
         sources: [],
         fallbackId: null,

@@ -32,6 +32,8 @@ export type SimpleDraft = {
   errorRules: ApiSlice["errorRules"];
   monthlyTokens: number | null;
   requestsPerMinute: number | null;
+  subscriptionName: string;
+  subscriptionPrice: number | null;
   calls: number;
   sources: ApiSlice[];
   fallbackId: number | null;
@@ -117,6 +119,8 @@ export function SimpleBarricadeForm({
             errorRules: draft.errorRules,
             monthlyTokens: draft.monthlyTokens,
             requestsPerMinute: draft.requestsPerMinute,
+            subscriptionName: draft.subscriptionName,
+            subscriptionPrice: draft.subscriptionPrice,
             calls: draft.calls,
           }}
         />
@@ -275,6 +279,8 @@ function draftSignature(draft: SimpleDraft) {
     errorRules: draft.errorRules,
     monthlyTokens: draft.monthlyTokens,
     requestsPerMinute: draft.requestsPerMinute,
+    subscriptionName: draft.subscriptionName,
+    subscriptionPrice: draft.subscriptionPrice,
     calls: draft.calls,
     sources: draft.sources,
     fallbackId: draft.fallbackId,

@@ -115,14 +115,31 @@ export type BarricadeSpend = {
   calls: number;
   success: number;
   latencyMs: number | null;
+  spend: number | null;
 };
+
+export type SubscriptionSpend = {
+  name: string;
+  price: number | null;
+  tokens: number | null;
+  mixedPrice: boolean;
+  mixedTokens: boolean;
+  calls: number;
+  spend: number;
+  routes: { barricadeId: number; barricadeName: string; apiName: string; calls: number; spend: number }[];
+};
+
+export function routeSpend(price: number | null, tokens: number | null, calls: number) {
+  if (price == null || tokens == null || tokens <= 0 || price < 0 || calls < 0) return null;
+  return (price / tokens) * calls;
+}
 
 export async function performanceReport(input?: { barricadeId?: number; from?: string; to?: string }) {
   const today = dayKey();
   const range = resolveRange(input?.from, input?.to, today);
   const barricadeId = input?.barricadeId && input.barricadeId > 0 ? input.barricadeId : 0;
   const span: (string | number)[] = [range.from, range.to, barricadeId, barricadeId];
-  const [daily, items, outcomes, durations, failures, apiTotals, apiDaily] = await Promise.all([
+  const [daily, items, outcomes, durations, failures, apiTotals, apiDaily, subscriptionRows] = await Promise.all([
     query<(RowDataPacket & { day: string; executed: number; checks: number })[]>(
       `SELECT DATE_FORMAT(u.day_key, '%Y-%m-%d') AS day,
               COALESCE(SUM(u.executed), 0) AS executed,
@@ -214,6 +231,30 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
        GROUP BY a.id, DATE_FORMAT(u.day_key, '%Y-%m-%d')`,
       [range.from, range.to],
     ),
+    query<(RowDataPacket & {
+      barricade_id: number;
+      barricade_name: string;
+      api_name: string;
+      subscription_name: string | null;
+      subscription_price: number | string | null;
+      monthly_tokens: number | null;
+      calls: number;
+    })[]>(
+      `SELECT s.barricade_id, b.name AS barricade_name, a.name AS api_name,
+              s.subscription_name, s.subscription_price, s.monthly_tokens,
+              (
+                SELECT COUNT(*) FROM call_logs l
+                WHERE l.barricade_id = s.barricade_id
+                  AND l.api_id = s.api_id
+                  AND l.log_scope = 'api'
+                  AND l.day_key BETWEEN ? AND ?
+                  AND l.outcome <> 'verificacao'
+              ) AS calls
+       FROM barricade_api_stats s
+       INNER JOIN barricades b ON b.id = s.barricade_id
+       INNER JOIN external_apis a ON a.id = s.api_id`,
+      [range.from, range.to],
+    ),
   ]);
 
   const byDay = new Map(daily.map((row) => [String(row.day).slice(0, 10), row]));
@@ -229,8 +270,32 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
   const byOutcome = new Map(
     outcomes.filter((row) => row.barricade_id != null).map((row) => [Number(row.barricade_id), row]),
   );
+  const priced = subscriptionRows.map((row) => {
+    const price = row.subscription_price == null ? null : Number(row.subscription_price);
+    const tokens = row.monthly_tokens == null ? null : Number(row.monthly_tokens);
+    const calls = Number(row.calls ?? 0);
+    return {
+      barricadeId: Number(row.barricade_id),
+      barricadeName: row.barricade_name,
+      apiName: row.api_name,
+      name: row.subscription_name?.trim() ?? "",
+      price,
+      tokens,
+      calls,
+      spend: routeSpend(price, tokens, calls),
+    };
+  });
+  const spendByBarricade = new Map<number, number>();
+  const pricedBarricades = new Set<number>();
+  for (const row of priced) {
+    if (row.spend == null) continue;
+    pricedBarricades.add(row.barricadeId);
+    spendByBarricade.set(row.barricadeId, (spendByBarricade.get(row.barricadeId) ?? 0) + row.spend);
+  }
+  const subscriptions = groupSubscriptions(priced);
   const barricades: BarricadeSpend[] = items.map((row) => {
     const outcome = byOutcome.get(Number(row.id));
+    const id = Number(row.id);
     return {
       id: Number(row.id),
       name: row.name,
@@ -247,6 +312,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
       calls: Number(outcome?.calls ?? 0),
       success: Number(outcome?.success ?? 0),
       latencyMs: outcome?.latency == null ? null : Math.round(Number(outcome.latency)),
+      spend: pricedBarricades.has(id) ? spendByBarricade.get(id) ?? 0 : null,
     };
   });
   const usageByApi = new Map<number, Map<string, number>>();
@@ -317,7 +383,62 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
     samples: samples.length,
     periodReal: series.reduce((total, day) => total + day.real, 0),
     periodChecks: series.reduce((total, day) => total + day.checks, 0),
+    subscriptions,
+    subscriptionSpend: scope.some((item) => item.spend != null) ? scope.reduce((total, item) => total + (item.spend ?? 0), 0) : null,
   };
+}
+
+function groupSubscriptions(rows: {
+  barricadeId: number;
+  barricadeName: string;
+  apiName: string;
+  name: string;
+  price: number | null;
+  tokens: number | null;
+  calls: number;
+  spend: number | null;
+}[]): SubscriptionSpend[] {
+  const groups = new Map<string, SubscriptionSpend & { prices: number[]; quotas: number[] }>();
+  for (const row of rows) {
+    if (!row.name || row.spend == null) continue;
+    const key = row.name.toLocaleLowerCase("pt-BR");
+    const current = groups.get(key) ?? {
+      name: row.name,
+      price: row.price,
+      tokens: row.tokens,
+      mixedPrice: false,
+      mixedTokens: false,
+      calls: 0,
+      spend: 0,
+      routes: [],
+      prices: [],
+      quotas: [],
+    };
+    if (row.price != null && !current.prices.some((value) => Math.abs(value - row.price!) < 0.001)) current.prices.push(row.price);
+    if (row.tokens != null && !current.quotas.includes(row.tokens)) current.quotas.push(row.tokens);
+    current.calls += row.calls;
+    current.spend += row.spend;
+    current.routes.push({
+      barricadeId: row.barricadeId,
+      barricadeName: row.barricadeName,
+      apiName: row.apiName,
+      calls: row.calls,
+      spend: row.spend,
+    });
+    groups.set(key, current);
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      name: group.name,
+      price: group.prices.length === 1 ? group.prices[0] : null,
+      tokens: group.quotas.length === 1 ? group.quotas[0] : null,
+      mixedPrice: group.prices.length > 1,
+      mixedTokens: group.quotas.length > 1,
+      calls: group.calls,
+      spend: group.spend,
+      routes: group.routes.sort((left, right) => left.barricadeName.localeCompare(right.barricadeName, "pt", { sensitivity: "base" }) || left.apiName.localeCompare(right.apiName, "pt", { sensitivity: "base" })),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, "pt", { sensitivity: "base" }));
 }
 
 function resolveRange(from: string | undefined, to: string | undefined, today: string) {

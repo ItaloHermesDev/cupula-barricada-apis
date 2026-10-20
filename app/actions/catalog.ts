@@ -217,11 +217,19 @@ export async function saveSimpleBarricade(_state: CatalogState, formData: FormDa
       })),
     );
     await saveRouteQuotas(savedId, [
-      { apiId, monthlyTokens: draft.monthlyTokens, requestsPerMinute: draft.requestsPerMinute },
+      {
+        apiId,
+        monthlyTokens: draft.monthlyTokens,
+        requestsPerMinute: draft.requestsPerMinute,
+        subscriptionName: draft.subscriptionName,
+        subscriptionPrice: draft.subscriptionPrice,
+      },
       ...sourceIds.map((id, position) => ({
         apiId: id,
         monthlyTokens: draft.sources[position]?.monthlyTokens ?? null,
         requestsPerMinute: draft.sources[position]?.requestsPerMinute ?? null,
+        subscriptionName: draft.sources[position]?.subscriptionName ?? null,
+        subscriptionPrice: draft.sources[position]?.subscriptionPrice ?? null,
       })),
     ]);
     const keep = new Set([apiId, ...sourceIds]);
@@ -306,6 +314,8 @@ async function readDraft(formData: FormData) {
     api: primary.api,
     monthlyTokens: primary.monthlyTokens,
     requestsPerMinute: primary.requestsPerMinute,
+    subscriptionName: primary.subscriptionName,
+    subscriptionPrice: primary.subscriptionPrice,
     sources,
     barricade: {
       apiId: 0,
@@ -400,6 +410,8 @@ async function readApiBlock(formData: FormData, prefix: string, apiName: string,
     apiId,
     monthlyTokens: readQuota(formData, field("monthly_tokens")),
     requestsPerMinute: readQuota(formData, field("requests_per_minute")),
+    subscriptionName: readSubscriptionName(formData, field("subscription_name")),
+    subscriptionPrice: readMoney(formData, field("subscription_price")),
     url,
     endpointPath: parts.endpointPath,
     responseTemplate,
@@ -424,6 +436,23 @@ async function readApiBlock(formData: FormData, prefix: string, apiName: string,
       active: true,
     },
   };
+}
+
+function readSubscriptionName(formData: FormData, name: string) {
+  const raw = String(formData.get(name) ?? "").trim();
+  if (!raw) return null;
+  if (raw.length > 120) throw new BarricadeValidationError("O nome da assinatura precisa ter até 120 caracteres.");
+  return raw;
+}
+
+function readMoney(formData: FormData, name: string) {
+  const raw = String(formData.get(name) ?? "").trim().replace(/\s/g, "").replace(",", ".");
+  if (!raw) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1_000_000) {
+    throw new BarricadeValidationError("O valor mensal da assinatura precisa ser um número a partir de zero.");
+  }
+  return Math.round(value * 100) / 100;
 }
 
 function readQuota(formData: FormData, name: string) {

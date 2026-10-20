@@ -112,6 +112,8 @@ const CREATE_ROUTE_STATS = `
     api_id INT UNSIGNED NOT NULL,
     monthly_tokens BIGINT UNSIGNED NULL,
     requests_per_minute INT UNSIGNED NULL,
+    subscription_name VARCHAR(120) NULL,
+    subscription_price DECIMAL(12,2) NULL,
     calls BIGINT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (barricade_id, api_id),
     CONSTRAINT barricade_api_stats_barricade_fk FOREIGN KEY (barricade_id) REFERENCES barricades (id) ON DELETE CASCADE,
@@ -276,6 +278,8 @@ export function ensureSchema() {
       await db.query(CREATE_SOURCES);
       await ensureColumn(db, "barricade_sources", "error_rules_json", "TEXT NULL");
       await db.query(CREATE_ROUTE_STATS);
+      await ensureColumn(db, "barricade_api_stats", "subscription_name", "VARCHAR(120) NULL");
+      await ensureColumn(db, "barricade_api_stats", "subscription_price", "DECIMAL(12,2) NULL");
       await ensureSignedDailyLimit(db);
       await db.query(CREATE_LOGOS);
       await db.query(CREATE_USAGE);
