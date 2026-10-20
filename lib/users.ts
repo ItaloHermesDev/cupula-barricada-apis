@@ -1,6 +1,6 @@
 import "server-only";
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
-import { DatabaseError, ensureSchema, getPool, query } from "@/lib/db";
+import { DatabaseError, ensureSchema, execute, getPool, query } from "@/lib/db";
 import { isPageKey, type PageKey } from "@/lib/pages";
 
 interface UserRow extends RowDataPacket {
@@ -63,6 +63,29 @@ export async function findUserById(id: string) {
     [numericId],
   );
   return rows[0] ?? null;
+}
+
+export async function findUserAuthById(id: string) {
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) return null;
+
+  const rows = await query<UserRow[]>(
+    "SELECT id, name, email, password_hash FROM users WHERE id = ? LIMIT 1",
+    [numericId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function updateUserProfile(userId: number, input: { name: string; email: string }) {
+  await execute("UPDATE users SET name = ?, email = ? WHERE id = ?", [
+    input.name,
+    input.email,
+    userId,
+  ]);
+}
+
+export async function updateUserPassword(userId: number, passwordHash: string) {
+  await execute("UPDATE users SET password_hash = ? WHERE id = ?", [passwordHash, userId]);
 }
 
 export async function listPageKeysForUser(userId: number) {

@@ -9,6 +9,7 @@ export function TextField({
   autoComplete,
   error,
   maxLength,
+  defaultValue,
 }: {
   id: string;
   name: string;
@@ -17,6 +18,7 @@ export function TextField({
   autoComplete: string;
   error?: string;
   maxLength: number;
+  defaultValue?: string;
 }) {
   return (
     <div>
@@ -30,6 +32,7 @@ export function TextField({
         autoComplete={autoComplete}
         required
         maxLength={maxLength}
+        defaultValue={defaultValue}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? `${id}-error` : undefined}
         className={fieldClass}

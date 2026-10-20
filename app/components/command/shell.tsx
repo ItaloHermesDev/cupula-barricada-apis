@@ -26,6 +26,7 @@ function titleFor(pathname: string) {
   if (pathname.startsWith("/trilha")) return { title: "Trilha", crumb: "Landpage" };
   if (pathname.startsWith("/historico")) return { title: "Histórico", crumb: "Monitoramento" };
   if (pathname === "/usuarios") return { title: "Usuários", crumb: "Acesso" };
+  if (pathname === "/conta") return { title: "Meus dados", crumb: "Conta" };
   if (pathname === "/sem-acesso") return { title: "Sem acesso", crumb: "Conta" };
   return { title: "Painel", crumb: "Operações" };
 }
@@ -123,7 +124,22 @@ export function CommandShell({
               <p className="truncate text-xs text-sidebar-muted">{user.email}</p>
             </div>
           </div>
-          <form action={logout} className="mt-3">
+          <Link
+            href="/conta"
+            title="Meus dados"
+            aria-current={pathname === "/conta" ? "page" : undefined}
+            className={`mt-3 flex w-full items-center justify-center gap-2 rounded-[12px] border px-3 py-2 text-sm transition-colors ${
+              collapsed ? "md:px-0" : ""
+            } ${
+              pathname === "/conta"
+                ? "border-[#1f6a86] bg-[#12384a] text-foreground"
+                : "border-line text-sidebar-foreground hover:border-accent/40 hover:text-accent"
+            }`}
+          >
+            <Icon name="settings" />
+            <span className={collapsed ? "md:sr-only" : ""}>Meus dados</span>
+          </Link>
+          <form action={logout} className="mt-2">
             <button
               type="submit"
               title="Sair"
@@ -172,7 +188,13 @@ export function CommandShell({
                 <div className="absolute right-0 z-30 mt-2 w-64 rounded-[14px] border border-line bg-card p-3 shadow-2xl">
                   <p className="truncate text-sm font-medium">{user.name}</p>
                   <p className="truncate text-xs text-muted">{user.email}</p>
-                  <form action={logout} className="mt-3">
+                  <Link
+                    href="/conta"
+                    className="mt-3 block w-full rounded-[12px] px-2 py-2 text-left text-sm text-foreground hover:bg-white/5"
+                  >
+                    Meus dados
+                  </Link>
+                  <form action={logout}>
                     <button type="submit" className="w-full rounded-[12px] px-2 py-2 text-left text-sm text-foreground hover:bg-white/5">
                       Sair
                     </button>
