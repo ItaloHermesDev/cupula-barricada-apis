@@ -268,7 +268,8 @@ export async function sampleBarricade(id: number, query: Record<string, string>)
   const asked = contract.known.length > 0 ? contract.asked : barricade.params.filter((param) => param.required).map((param) => param.name);
   const missing = asked.find((name) => !query[name]?.trim());
   if (missing) return { error: "Faltam parâmetros obrigatórios." };
-  const consumer: ConsumerContext = { query, header: {}, body: {}, path: { ...query } };
+  const normalized = normalizeInstagramQuery(query);
+  const consumer: ConsumerContext = { query: normalized, header: {}, body: {}, path: { ...normalized } };
   const report = await sampleDelivery(barricade, consumer, true);
   if ("error" in report) return report;
   return {
@@ -796,7 +797,7 @@ async function readIncoming(request: Request, barricade: BarricadeRecord) {
   const allowed = contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name);
   const collected = collectQuery(url.searchParams, allowed);
   if ("error" in collected && collected.error) return { error: collected.error };
-  const query = collected.query ?? {};
+  const query = normalizeInstagramQuery(collected.query ?? {});
   const asked = contract.known.length > 0 ? contract.asked : barricade.params.filter((param) => param.required).map((param) => param.name);
   if (asked.some((name) => !query[name]?.trim())) {
     return { error: "parametro_obrigatorio" as const };
@@ -824,14 +825,34 @@ async function readIncoming(request: Request, barricade: BarricadeRecord) {
   return { consumer: { query, header, body, path } satisfies ConsumerContext };
 }
 
+const INSTAGRAM_PROFILE = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([A-Za-z0-9._]+)/i;
+const RESERVED_HANDLE = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct"]);
+
+function bareInstagramHandle(value: string) {
+  const match = value.trim().replace(/^@+/, "").match(INSTAGRAM_PROFILE);
+  const handle = match?.[1]?.replace(/\/+$/, "") ?? "";
+  if (!handle || RESERVED_HANDLE.has(handle.toLowerCase())) return value;
+  return handle;
+}
+
+function normalizeInstagramQuery(query: Record<string, string>) {
+  const next = { ...query };
+  for (const key of Object.keys(next)) {
+    if (!/username/i.test(key) || !next[key]) continue;
+    next[key] = bareInstagramHandle(next[key]);
+  }
+  return next;
+}
+
 function sampleConsumer(raw: string): ConsumerContext {
   try {
     const parsed = raw.trim() ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const query = normalizeInstagramQuery(stringRecord(parsed.query));
     return {
-      query: stringRecord(parsed.query),
+      query,
       header: stringRecord(parsed.header),
       body: parsed.body ?? {},
-      path: stringRecord(parsed.path),
+      path: { ...stringRecord(parsed.path), ...query },
     };
   } catch {
     return { query: {}, header: {}, body: {}, path: {} };
