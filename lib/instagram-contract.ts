@@ -62,6 +62,7 @@ function mediaCard(item: Record<string, unknown>) {
   const user = asRecord(media.user) ?? asRecord(media.owner) ?? {};
   const carousel = Array.isArray(media.carousel_media) ? media.carousel_media.length : null;
   const id = textId(media.id) ?? textId(media.pk);
+  const picture = imageUrl(media);
   return {
     pk: textId(media.pk) ?? id,
     id,
@@ -73,7 +74,8 @@ function mediaCard(item: Record<string, unknown>) {
     comment_count: countOrNull(media.comment_count),
     view_count: countOrNull(media.view_count),
     caption: captionText(media.caption),
-    image_url: imageUrl(media),
+    image_url: picture,
+    image_versions2: picture ? { candidates: [{ url: picture, width: 0, height: 0 }] } : null,
     video_url: bestUrl(media.video_versions),
     username: typeof user.username === "string" ? user.username : null,
     user_id: textId(user.pk) ?? textId(user.id),
@@ -86,6 +88,15 @@ function looksLikeUser(item: Record<string, unknown>) {
   return typeof item.username === "string" || item.pk != null || item.id != null;
 }
 
+function pictureUrl(source: Record<string, unknown>) {
+  if (typeof source.profile_pic_url === "string" && source.profile_pic_url) return source.profile_pic_url;
+  const info = asRecord(source.hd_profile_pic_url_info);
+  if (typeof info?.url === "string" && info.url) return info.url;
+  if (typeof source.profile_pic_url_hd === "string" && source.profile_pic_url_hd) return source.profile_pic_url_hd;
+  if (typeof source.hd_profile_pic_url === "string" && source.hd_profile_pic_url) return source.hd_profile_pic_url;
+  return null;
+}
+
 function userCard(item: Record<string, unknown>) {
   const source = asRecord(item.node) ?? item;
   const friendship = asRecord(source.friendship_status);
@@ -95,7 +106,7 @@ function userCard(item: Record<string, unknown>) {
     id,
     username: typeof source.username === "string" ? source.username : null,
     full_name: typeof source.full_name === "string" ? source.full_name : null,
-    profile_pic_url: typeof source.profile_pic_url === "string" ? source.profile_pic_url : null,
+    profile_pic_url: pictureUrl(source),
     is_private: boolOrNull(source.is_private),
     is_verified: boolOrNull(source.is_verified),
     followed_by_viewer: boolOrNull(source.followed_by_viewer) ?? boolOrNull(friendship?.following),
@@ -138,4 +149,83 @@ export function alignInstagramPayload(payload: unknown, slug: string) {
     next.error = null;
   }
   return next;
+}
+
+function instagramSlug(slug: string) {
+  return slug.startsWith("instagram-stable/") || slug.startsWith("realtime-instagram/") || slug.startsWith("instagram-best/");
+}
+
+function layers(body: unknown) {
+  const top = asRecord(body);
+  if (!top) return [];
+  const data = asRecord(top.data);
+  return data ? [top, data] : [top];
+}
+
+function filledList(value: unknown): value is unknown[] {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function firstList(candidates: unknown[]) {
+  return candidates.find(filledList) ?? null;
+}
+
+function edgeNodes(value: unknown) {
+  const record = asRecord(value);
+  if (!record || !filledList(record.edges)) return null;
+  return record.edges.map((edge) => {
+    const row = asRecord(edge);
+    const node = row ? asRecord(row.node) : null;
+    return node ?? edge;
+  });
+}
+
+function namedLists(body: unknown, names: string[]) {
+  const found: unknown[] = [];
+  for (const source of layers(body)) {
+    for (const name of names) found.push(source[name]);
+  }
+  return found;
+}
+
+function userLists(body: unknown) {
+  const found: unknown[] = [];
+  for (const source of layers(body)) {
+    found.push(source.users, source.following, source.followers);
+    found.push(edgeNodes(source.edge_followed_by), edgeNodes(source.edge_follow));
+  }
+  if (Array.isArray(body)) found.push(body);
+  return found;
+}
+
+export function shapeInstagramPayload(slug: string, body: unknown, rendered: unknown) {
+  if (!instagramSlug(slug)) return rendered;
+  const base = asRecord(rendered) ?? {};
+  if (slug.endsWith("/posts")) {
+    const posts = firstList([base.posts, base.items, ...namedLists(body, ["posts", "items"])]);
+    if (!posts) return rendered;
+    return { ...base, posts, items: posts };
+  }
+  if (slug.endsWith("/marcacoes")) {
+    const items = firstList([base.items, base.tagged_posts, base.posts, ...namedLists(body, ["items", "tagged_posts", "posts"])]);
+    if (!items) return rendered;
+    return { ...base, items };
+  }
+  if (slug.endsWith("/seguidores") || slug.endsWith("/seguindo") || slug.endsWith("/similares")) {
+    const users = firstList([base.users, ...userLists(body)]);
+    if (!users) return rendered;
+    return { ...base, users };
+  }
+  return rendered;
+}
+
+export function instagramPayloadEmpty(slug: string, payload: unknown) {
+  if (payload === undefined || !instagramSlug(slug)) return false;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return true;
+  const json = payload as Record<string, unknown>;
+  if (slug.endsWith("/perfil")) return !(json.pk || json.id || json.username);
+  if (slug.endsWith("/posts")) return !filledList(json.posts) && !filledList(json.items);
+  if (slug.endsWith("/marcacoes")) return !filledList(json.items) && !filledList(json.posts);
+  if (slug.endsWith("/seguidores") || slug.endsWith("/seguindo") || slug.endsWith("/similares")) return !filledList(json.users);
+  return false;
 }

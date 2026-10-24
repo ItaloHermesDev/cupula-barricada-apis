@@ -14,7 +14,7 @@ import { maskedErrorBody, packErrorLog, type ErrorCallRecord } from "@/lib/error
 import { admit, clientAddress, collectQuery, hasControlCharacter, isHopHeader, readRequestText } from "@/lib/intake";
 import { combinePayloads } from "@/lib/combine";
 import { listBarricadeSources, recordRouteCall } from "@/lib/sources";
-import { alignInstagramPayload } from "@/lib/instagram-contract";
+import { alignInstagramPayload, instagramPayloadEmpty, shapeInstagramPayload } from "@/lib/instagram-contract";
 import { applyTemplate, fillString, fillUrlPath, renderBody, type ConsumerContext } from "@/lib/transform";
 
 const MESSAGES: Record<string, string> = {
@@ -200,12 +200,16 @@ async function deliverCall(
   const renderedPrimary = settledPrimary.action === "keep"
     ? renderBarricadePayload(barricade.slug, settledPrimary.result.body, barricade.responseTemplate, consumer)
     : undefined;
+  const emptyInstagram = settledPrimary.action === "keep" && !hasPageCursor(consumer) && instagramPayloadEmpty(barricade.slug, renderedPrimary);
   const primaryWantsFallback = allowFallback && (
+    emptyInstagram ||
     settledPrimary.action === "fallback" ||
     (settledPrimary.action === "legacy" && canFallback(barricade, settledPrimary.result.failure))
   );
   if (primaryWantsFallback) {
-    const hopped = await hopFallback(barricade, consumer, requestId, primaryReason, primaryCause, trail);
+    const hopReason = emptyInstagram ? "vazio" : primaryReason;
+    const hopCause = emptyInstagram ? `${barricade.apiName}, a resposta veio sem o perfil ou sem a lista.` : primaryCause;
+    const hopped = await hopFallback(barricade, consumer, requestId, hopReason, hopCause, trail);
     if (hopped.ok) return { ...hopped.delivery, errorCalls };
     if (hopped.bothFailed) bothFailedText = hopped.detail;
     else reserveNote = hopped.detail;
@@ -433,7 +437,12 @@ async function sampleDelivery(
     : { ...emptyResult(), failure: "destino_bloqueado" as const };
   const settledPrimary = await settleUpstream(first, barricade.errorRules, () => callUpstream(primary, consumer, secret));
   const apis = [describeSample(primary.name, settledPrimary, secret)];
+  const renderedPrimary = settledPrimary.action === "keep"
+    ? renderBarricadePayload(barricade.slug, settledPrimary.result.body, barricade.responseTemplate, consumer)
+    : undefined;
+  const emptyInstagram = settledPrimary.action === "keep" && !hasPageCursor(consumer) && instagramPayloadEmpty(barricade.slug, renderedPrimary);
   const wantsFallback = (settled: Settled) => allowFallback && (
+    emptyInstagram ||
     settled.action === "fallback" ||
     (settled.action === "legacy" && canFallback(barricade, settled.result.failure))
   );
@@ -540,12 +549,13 @@ function pushSamplePart(parts: unknown[], api: SampleApi, body: unknown, templat
   }
 }
 
+function hasPageCursor(consumer: ConsumerContext) {
+  return Boolean(String(consumer.query.pagination_token || consumer.query.max_id || consumer.query.next_max_id || "").trim());
+}
+
 function renderBarricadePayload(slug: string, body: unknown, template: string, consumer: ConsumerContext) {
   const rendered = renderPayload(body, template, consumer);
-  if (slug !== "instagram-stable/similares" || !Array.isArray(body)) return rendered;
-  const record = rendered && typeof rendered === "object" && !Array.isArray(rendered) ? { ...(rendered as Record<string, unknown>) } : {};
-  if (!Array.isArray(record.users)) record.users = body;
-  return record;
+  return shapeInstagramPayload(slug, body, rendered);
 }
 
 function readableJson(value: string) {
