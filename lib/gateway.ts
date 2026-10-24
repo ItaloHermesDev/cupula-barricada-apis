@@ -8,12 +8,13 @@ import { execute } from "@/lib/db";
 import { isSensitiveHeader, maskHeaders, maskText } from "@/lib/secrets";
 import { assertPublicHttpUrl, DestinationError } from "@/lib/ssrf";
 import { flattenJson, leavesFromText, parameterContract, splitApiUrl } from "@/lib/draft";
-import { describeErrorBody, failureText, fieldMessage, matchErrorRule, type ErrorRule } from "@/lib/error-rules";
+import { describeErrorBody, embeddedFailureRule, failureText, fieldMessage, matchErrorRule, type ErrorRule } from "@/lib/error-rules";
 import { readableFailure } from "@/lib/log-read";
 import { maskedErrorBody, packErrorLog, type ErrorCallRecord } from "@/lib/error-log";
 import { admit, clientAddress, collectQuery, hasControlCharacter, isHopHeader, readRequestText } from "@/lib/intake";
 import { combinePayloads } from "@/lib/combine";
 import { listBarricadeSources, recordRouteCall } from "@/lib/sources";
+import { alignInstagramPayload } from "@/lib/instagram-contract";
 import { applyTemplate, fillString, fillUrlPath, renderBody, type ConsumerContext } from "@/lib/transform";
 
 const MESSAGES: Record<string, string> = {
@@ -34,6 +35,7 @@ const MESSAGES: Record<string, string> = {
   indisponivel: "O serviço externo não respondeu.",
   tempo_esgotado: "O serviço externo excedeu o tempo limite.",
   cota: "A cota do provedor foi atingida.",
+  id_instagram: "O id numérico do Instagram não foi encontrado.",
   provedor: "A chamada foi recusada pelo serviço externo.",
 };
 
@@ -122,7 +124,7 @@ export async function serveBarricade(request: Request, slug: string) {
     return errorResponse(request, barricade, mapped.status, mapped.code, requestId);
   }
 
-  return Response.json(delivery.payload, {
+  return Response.json(presentInstagram(delivery.payload, delivered.processed.slug), {
     status: consumerStatus,
     headers: { ...cors, "x-request-id": requestId, "cache-control": "no-store" },
   });
@@ -166,6 +168,12 @@ async function deliverCall(
   }
   const trail = new Set(seen);
   trail.add(barricade.id);
+  const page = pageDecision(barricade.slug, consumer, seen.size > 0);
+  if (page.skip && allowFallback && barricade.fallbackId) {
+    const hopped = await hopFallback(barricade, consumer, requestId, "pagina", `${barricade.apiName}, o token desta página pertence à reserva.`, trail);
+    if (hopped.ok) return { ...hopped.delivery, errorCalls: [] };
+  }
+  consumer = page.consumer;
   const primary = await executeProtected(barricade, consumer, requestId);
   if (primary.blocked) {
     return { blocked: primary.blocked, usedFallback: false, triedReserve: false, fallbackReason: null, processed: barricade, upstream: primary.result, failureDetail: primary.blocked, failureCore: primary.blocked, errorCalls: [], delivery: emptyDelivery() };
@@ -190,21 +198,14 @@ async function deliverCall(
   let reserveNote = "";
   let bothFailedText = "";
   const renderedPrimary = settledPrimary.action === "keep"
-    ? renderPayload(settledPrimary.result.body, barricade.responseTemplate, consumer)
+    ? renderBarricadePayload(barricade.slug, settledPrimary.result.body, barricade.responseTemplate, consumer)
     : undefined;
-  const paging = Boolean(String(consumer.query.pagination_token || consumer.query.max_id || "").trim());
-  const emptyInstagram = !paging && instagramPayloadEmpty(barricade.slug, renderedPrimary);
   const primaryWantsFallback = allowFallback && (
-    emptyInstagram ||
     settledPrimary.action === "fallback" ||
     (settledPrimary.action === "legacy" && canFallback(barricade, settledPrimary.result.failure))
   );
   if (primaryWantsFallback) {
-    const hopReason = emptyInstagram && settledPrimary.action === "keep" ? "vazio" : primaryReason;
-    const hopCause = emptyInstagram && settledPrimary.action === "keep"
-      ? `${barricade.apiName}, a resposta veio sem o perfil ou sem a lista.`
-      : primaryCause;
-    const hopped = await hopFallback(barricade, consumer, requestId, hopReason, hopCause, trail);
+    const hopped = await hopFallback(barricade, consumer, requestId, primaryReason, primaryCause, trail);
     if (hopped.ok) return { ...hopped.delivery, errorCalls };
     if (hopped.bothFailed) bothFailedText = hopped.detail;
     else reserveNote = hopped.detail;
@@ -258,7 +259,7 @@ async function deliverCall(
       continue;
     }
     if (extraStatus == null) extraStatus = extra.settled.result.status;
-    parts.push(renderPayload(extra.settled.result.body, extra.template, consumer));
+    parts.push(renderBarricadePayload(barricade.slug, extra.settled.result.body, extra.template, consumer));
   }
   const delivered = parts.length > 0;
   const skippedText = skipped.join(" · ");
@@ -339,13 +340,17 @@ async function recallPrimary(barricade: BarricadeRecord, consumer: ConsumerConte
   return result;
 }
 
+function ruleFor(result: UpstreamResult, rules: ErrorRule[]) {
+  return matchErrorRule(rules, { status: result.status, body: result.body }) ?? embeddedFailureRule(result.body);
+}
+
 async function settleUpstream(result: UpstreamResult, rules: ErrorRule[], again: () => Promise<UpstreamResult>): Promise<Settled> {
-  const matched = matchErrorRule(rules, { status: result.status, body: result.body });
+  const matched = ruleFor(result, rules);
   if (!matched) return { result, action: result.ok ? "keep" : "legacy", retried: false, rule: null };
   if (matched.action === "retry") {
     await delay(matched.waitSeconds * 1000);
     const second = await again();
-    const next = matchErrorRule(rules, { status: second.status, body: second.body });
+    const next = ruleFor(second, rules);
     if (!next) return { result: second, action: second.ok ? "keep" : "legacy", retried: true, rule: null };
     if (next.action === "fallback") return { result: second, action: "fallback", retried: true, rule: next };
     return { result: second, action: "omit", retried: true, rule: next };
@@ -371,15 +376,15 @@ export async function sampleBarricade(id: number, query: Record<string, string>)
     }
   }
   const contract = await barricadeContract(barricade);
-  const allowedNames = contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name);
+  const allowedNames = widenInstagramNames(contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name));
   const allowed = new Set(allowedNames);
   if (allowed.size > 0 && Object.keys(query).some((key) => !allowed.has(key))) {
     return { error: "A chamada enviou um parâmetro que esta barricada não aceita." };
   }
+  const normalized = alignInstagramQuery(query);
   const asked = contract.known.length > 0 ? contract.asked : barricade.params.filter((param) => param.required).map((param) => param.name);
-  const missing = asked.find((name) => !query[name]?.trim());
+  const missing = asked.find((name) => !normalized[name]?.trim());
   if (missing) return { error: "Faltam parâmetros obrigatórios." };
-  const normalized = normalizeInstagramQuery(query);
   const consumer: ConsumerContext = { query: normalized, header: {}, body: {}, path: { ...normalized } };
   const report = await sampleDelivery(barricade, consumer, true);
   if ("error" in report) return report;
@@ -414,6 +419,12 @@ async function sampleDelivery(
   if (seen.has(barricade.id)) return { error: "reserva: ciclo" };
   const trail = new Set(seen);
   trail.add(barricade.id);
+  const page = pageDecision(barricade.slug, consumer, seen.size > 0);
+  if (page.skip && allowFallback && barricade.fallbackId) {
+    const hopped = await sampleHop(barricade, consumer, trail);
+    if (hopped?.ok) return { ok: true, total: hopped.total, apis: hopped.apis, fallback: hopped.name };
+  }
+  consumer = page.consumer;
   const primary = await getApi(barricade.apiId);
   if (!primary) return { error: "API não encontrada." };
   const secret = primary.active ? await getApiSecret(primary.id) : "";
@@ -422,19 +433,13 @@ async function sampleDelivery(
     : { ...emptyResult(), failure: "destino_bloqueado" as const };
   const settledPrimary = await settleUpstream(first, barricade.errorRules, () => callUpstream(primary, consumer, secret));
   const apis = [describeSample(primary.name, settledPrimary, secret)];
-  const paging = Boolean(String(consumer.query.pagination_token || consumer.query.max_id || "").trim());
-  const renderedPrimary = settledPrimary.action === "keep"
-    ? renderPayload(settledPrimary.result.body, barricade.responseTemplate, consumer)
-    : undefined;
-  const emptyInstagram = !paging && instagramPayloadEmpty(barricade.slug, renderedPrimary);
   const wantsFallback = (settled: Settled) => allowFallback && (
-    emptyInstagram ||
     settled.action === "fallback" ||
     (settled.action === "legacy" && canFallback(barricade, settled.result.failure))
   );
   if (wantsFallback(settledPrimary)) {
     const hopped = await sampleHop(barricade, consumer, trail);
-    if (hopped) return { ok: true, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
+    if (hopped) return { ok: hopped.ok, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
   }
 
   const linked = await listBarricadeSources(barricade.id);
@@ -450,17 +455,17 @@ async function sampleDelivery(
   }
   if (allowFallback && extras.some((extra) => extra.settled.action === "fallback")) {
     const hopped = await sampleHop(barricade, consumer, trail);
-    if (hopped) return { ok: true, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
+    if (hopped) return { ok: hopped.ok, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
   }
 
   const parts: unknown[] = [];
   const secrets = [secret, ...extras.map((extra) => extra.secret)].filter((item) => item.length >= 4);
-  if (settledPrimary.action === "keep") pushSamplePart(parts, apis[0], settledPrimary.result.body, barricade.responseTemplate, consumer);
+  if (settledPrimary.action === "keep") pushSamplePart(parts, apis[0], settledPrimary.result.body, barricade.responseTemplate, consumer, barricade.slug);
   for (const extra of extras) {
     if (extra.settled.action !== "keep") continue;
-    pushSamplePart(parts, apis[extra.index], extra.settled.result.body, extra.template, consumer);
+    pushSamplePart(parts, apis[extra.index], extra.settled.result.body, extra.template, consumer, barricade.slug);
   }
-  const total = parts.length > 0 ? maskText(JSON.stringify(combinePayloads(parts), null, 2), secrets) : "Nenhuma API devolveu conteúdo para a barricada.";
+  const total = parts.length > 0 ? maskText(JSON.stringify(presentInstagram(combinePayloads(parts), barricade.slug), null, 2), secrets) : "Nenhuma API devolveu conteúdo para a barricada.";
   return { ok: parts.length > 0, total, apis, fallback: null };
 }
 
@@ -468,10 +473,11 @@ async function sampleHop(barricade: BarricadeRecord, consumer: ConsumerContext, 
   const alternative = barricade.fallbackId ? await loadAlternative(barricade.fallbackId) : null;
   if (!alternative || !(barricade.method === "GET" || barricade.idempotent)) return null;
   const second = await sampleDelivery(alternative, aliasInstagramConsumer(consumer), true, seen);
-  if ("error" in second || !second.ok) return null;
+  if ("error" in second) return { name: alternative.name, total: second.error, apis: [], ok: false };
   return {
     name: alternative.name,
     total: second.total,
+    ok: second.ok,
     apis: second.apis.map((api) => ({ ...api, name: `${alternative.name} · ${api.name}` })),
   };
 }
@@ -526,12 +532,20 @@ function joinFailure(primary: string, reserve: string) {
   return [primaryBit, reserveBit].filter(Boolean).join(" · ").slice(0, 500);
 }
 
-function pushSamplePart(parts: unknown[], api: SampleApi, body: unknown, template: string, consumer: ConsumerContext) {
+function pushSamplePart(parts: unknown[], api: SampleApi, body: unknown, template: string, consumer: ConsumerContext, slug: string) {
   try {
-    parts.push(renderPayload(body, template, consumer));
+    parts.push(renderBarricadePayload(slug, body, template, consumer));
   } catch {
     api.status = `${api.status} · resposta inválida`;
   }
+}
+
+function renderBarricadePayload(slug: string, body: unknown, template: string, consumer: ConsumerContext) {
+  const rendered = renderPayload(body, template, consumer);
+  if (slug !== "instagram-stable/similares" || !Array.isArray(body)) return rendered;
+  const record = rendered && typeof rendered === "object" && !Array.isArray(rendered) ? { ...(rendered as Record<string, unknown>) } : {};
+  if (!Array.isArray(record.users)) record.users = body;
+  return record;
 }
 
 function readableJson(value: string) {
@@ -619,85 +633,75 @@ async function executeProtected(barricade: BarricadeRecord, consumer: ConsumerCo
 }
 
 const USER_ID_SLOT = /[?&]user_id=\{\{\s*consumer\.query\.([a-z0-9_]+)\s*\|/i;
+const instagramIds = new Map<string, { id: string; at: number }>();
 
-function instagramPayloadEmpty(slug: string, payload: unknown) {
-  if (payload === undefined) return false;
-  if (!slug.startsWith("instagram-stable/") && !slug.startsWith("realtime-instagram/")) return false;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return true;
-  const json = payload as Record<string, unknown>;
-  if (slug.endsWith("/perfil")) return !(json.pk || json.id || json.username);
-  if (slug.endsWith("/posts")) return !filledList(json.posts) && !filledList(json.items);
-  if (slug.endsWith("/marcacoes")) return !filledList(json.items) && !filledList(json.posts);
-  return !filledList(json.users);
-}
-
-function filledList(value: unknown) {
-  return Array.isArray(value) && value.length > 0;
-}
-
-async function withInstagramUserId(api: ApiRecord, consumer: ConsumerContext, secret: string): Promise<ConsumerContext> {
+async function withInstagramUserId(api: ApiRecord, consumer: ConsumerContext, _secret: string): Promise<ConsumerContext> {
   const match = api.endpointPath.match(USER_ID_SLOT);
   if (!match) return consumer;
   const slot = match[1];
   const query = { ...consumer.query };
   const current = String(query[slot] || "").trim();
   if (/^\d+$/.test(current)) return consumer;
-  const handle = String(query.username_or_url || query.username_or_id || query.username || query.user_id || current || "")
+  const handle = String(query.username_or_url || query.username_or_id || query.username || current || "")
     .trim()
     .replace(/^@+/, "");
-  if (!handle) return consumer;
-  const id = /^\d+$/.test(handle) ? handle : await lookupInstagramUserId(api, handle, secret);
-  if (!id) return consumer;
+  const id = /^\d+$/.test(handle) ? handle : await resolveInstagramUserId(handle);
+  if (!id) {
+    query[slot] = "";
+    delete query.user_id;
+    return { ...consumer, query, path: { ...consumer.path, ...query, [slot]: "" } };
+  }
   query[slot] = id;
   query.user_id = id;
   return { ...consumer, query, path: { ...consumer.path, ...query } };
 }
 
-async function lookupInstagramUserId(api: ApiRecord, handle: string, secret: string): Promise<string> {
+async function resolveInstagramUserId(handle: string) {
   const username = handle.slice(0, 80);
   if (!/^[A-Za-z0-9._]+$/.test(username)) return "";
-  const lookupConsumer: ConsumerContext = {
-    query: { username_or_url: username, username },
-    header: {},
-    body: {},
-    path: { username_or_url: username, username },
-  };
-  try {
-    const target = new URL(joinUrl(api.baseUrl, `/user_id_by_username?username=${encodeURIComponent(username)}`));
-    assertPinned(api.baseUrl, target);
-    await assertPublicHttpUrl(target.toString());
-    const headers: Record<string, string> = {};
-    for (const pair of api.headers) {
-      if (isHopHeader(pair.name)) continue;
-      const value = fillString(pair.value, lookupConsumer);
-      if (value && !hasControlCharacter(value)) headers[pair.name] = value;
+  const cached = instagramIds.get(username.toLowerCase());
+  if (cached && Date.now() - cached.at < 15 * 60 * 1000) return cached.id;
+  for (const slug of ["realtime-instagram/perfil", "instagram-stable/perfil", "instagram-best/id"]) {
+    const id = await instagramIdFrom(slug, username);
+    if (id) {
+      instagramIds.set(username.toLowerCase(), { id, at: Date.now() });
+      return id;
     }
-    if (api.authType === "bearer" && secret) headers.Authorization = `Bearer ${secret}`;
-    if (api.authType === "basic" && secret) headers.Authorization = `Basic ${Buffer.from(secret).toString("base64")}`;
-    if (api.authType === "api_key" && secret && !isHopHeader(api.credentialHeader || "X-Api-Key")) {
-      headers[api.credentialHeader || "X-Api-Key"] = secret;
-    }
-    const response = await fetch(target, {
-      method: "GET",
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(Math.min(api.timeoutMs || 8000, 8000)),
-    });
-    if (response.status < 200 || response.status >= 300) return "";
-    const parsed = safeJson(await response.text());
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
-    const record = parsed as Record<string, unknown>;
-    const digits = String(record.UserID ?? record.user_id ?? record.id ?? record.pk ?? "").trim();
-    return /^\d+$/.test(digits) ? digits : "";
-  } catch {
-    return "";
   }
+  return "";
+}
+
+async function instagramIdFrom(slug: string, handle: string) {
+  const barricade = await getBarricadeBySlug(slug);
+  if (!barricade?.active) return "";
+  const api = await getApi(barricade.apiId);
+  if (!api?.active) return "";
+  const secret = await getApiSecret(api.id);
+  const query = { username_or_url: handle, username_or_id: handle, username: handle };
+  const result = await callUpstream(api, { query, header: {}, body: {}, path: { ...query } }, secret);
+  if (!result.ok) return "";
+  return readInstagramId(result.body);
+}
+
+function readInstagramId(body: unknown) {
+  const record = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : null;
+  if (!record) return "";
+  const data = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data as Record<string, unknown> : {};
+  for (const value of [record.UserID, record.user_id, record.pk, record.id, data.pk, data.id, data.user_id, data.UserID]) {
+    const digits = String(value ?? "").trim();
+    if (/^\d+$/.test(digits)) return digits;
+  }
+  return "";
 }
 
 async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: string) {
   const started = Date.now();
   const prepared = await withInstagramUserId(api, consumer, secret);
-  const requestBody = renderBody(api.bodyTemplate, prepared) ?? "";
+  const userIdSlot = api.endpointPath.match(USER_ID_SLOT);
+  if (userIdSlot && !/^\d+$/.test(String(prepared.query[userIdSlot[1]] || "").trim())) {
+    return resultShell("", api.method, {}, "", started, false, null, {}, "O id numérico do Instagram não foi encontrado.", "id_instagram");
+  }
+  const requestBody = omitBlank(renderBody(api.bodyTemplate, prepared) ?? "", "pagination_token");
   let url = "";
   const requestHeaders: Record<string, string> = {};
   try {
@@ -707,6 +711,9 @@ async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: s
     for (const pair of api.query) {
       const value = fillString(pair.value, prepared);
       if (value && !hasControlCharacter(value)) target.searchParams.set(pair.name, value);
+    }
+    for (const key of [...target.searchParams.keys()]) {
+      if (!target.searchParams.get(key)) target.searchParams.delete(key);
     }
     url = target.toString();
     assertPinned(api.baseUrl, target);
@@ -744,6 +751,21 @@ async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: s
     const failure = error instanceof DestinationError ? "destino_bloqueado" : isTimeout(error) ? "tempo_esgotado" : error instanceof Error && error.message === "grande" ? "resposta_grande" : "conexao";
     return resultShell(url, api.method, requestHeaders, requestBody, started, false, null, {}, "", failure);
   }
+}
+
+function omitBlank(body: string, field: string) {
+  if (!body.includes(field)) return body;
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return body;
+    if (parsed[field] === "" || parsed[field] == null) {
+      delete parsed[field];
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    return body;
+  }
+  return body;
 }
 
 function resultShell(
@@ -1049,10 +1071,10 @@ function errorResponse(
 async function readIncoming(request: Request, barricade: BarricadeRecord) {
   const url = new URL(request.url);
   const contract = await barricadeContract(barricade);
-  const allowed = contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name);
+  const allowed = widenInstagramNames(contract.known.length > 0 ? contract.known : barricade.params.map((param) => param.name));
   const collected = collectQuery(url.searchParams, allowed);
   if ("error" in collected && collected.error) return { error: collected.error };
-  const query = normalizeInstagramQuery(collected.query ?? {});
+  const query = alignInstagramQuery(collected.query ?? {});
   const asked = contract.known.length > 0 ? contract.asked : barricade.params.filter((param) => param.required).map((param) => param.name);
   if (asked.some((name) => !query[name]?.trim())) {
     return { error: "parametro_obrigatorio" as const };
@@ -1083,13 +1105,97 @@ async function readIncoming(request: Request, barricade: BarricadeRecord) {
 const INSTAGRAM_PROFILE = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([A-Za-z0-9._]+)/i;
 const RESERVED_HANDLE = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct"]);
 
-function aliasInstagramConsumer(consumer: ConsumerContext): ConsumerContext {
+const INSTAGRAM_ALIASES = [
+  ["username_or_url", "username_or_id", "username"],
+  ["pagination_token", "max_id"],
+];
+
+const PAGE_ORDER = { st: 0, rt: 1, bx: 2, fast: 2 } as const;
+
+function pagePrefix(slug: string) {
+  if (slug.startsWith("instagram-stable/")) return "st" as const;
+  if (slug.startsWith("realtime-instagram/")) return "rt" as const;
+  if (slug.startsWith("instagram-best/")) return "bx" as const;
+  if (slug.startsWith("instagram-fast/")) return "fast" as const;
+  return "";
+}
+
+function acceptsPageToken(slug: string) {
+  return /\/(posts|seguidores|seguindo)$/.test(slug);
+}
+
+function pageDecision(slug: string, consumer: ConsumerContext, isReserve: boolean) {
+  const prefix = pagePrefix(slug);
+  if (!prefix) return { skip: false, consumer };
   const query = { ...consumer.query };
-  const raw = query.username_or_id || query.username_or_url || query.username || "";
-  const handle = bareInstagramHandle(raw).replace(/^@+/, "").trim();
-  if (!handle) return consumer;
-  if (!query.username_or_id?.trim()) query.username_or_id = handle;
-  if (!query.username_or_url?.trim()) query.username_or_url = handle;
+  const path = { ...consumer.path };
+  if (!acceptsPageToken(slug)) {
+    delete query.pagination_token;
+    delete query.max_id;
+    delete path.pagination_token;
+    delete path.max_id;
+    return { skip: false, consumer: { ...consumer, query, path: { ...path, ...query } } };
+  }
+  const raw = (query.pagination_token || query.max_id || "").trim();
+  const marked = raw.match(/^(st|rt|bx|fast):(.*)$/);
+  delete query.pagination_token;
+  delete query.max_id;
+  let token = "";
+  let skip = false;
+  if (marked) {
+    const owner = marked[1] as keyof typeof PAGE_ORDER;
+    if (owner === prefix) token = marked[2];
+    else if (PAGE_ORDER[owner] > PAGE_ORDER[prefix]) skip = true;
+  } else if (raw && !isReserve) {
+    token = raw;
+  }
+  if (token) {
+    if (prefix === "st") query.pagination_token = token;
+    else query.max_id = token;
+  }
+  delete path.pagination_token;
+  delete path.max_id;
+  return { skip, consumer: { ...consumer, query, path: { ...path, ...query } } };
+}
+
+function presentInstagram(payload: unknown, slug: string) {
+  const stamped = stampPageToken(alignInstagramPayload(payload, slug), slug);
+  if (acceptsPageToken(slug) || !stamped || typeof stamped !== "object" || Array.isArray(stamped)) return stamped;
+  const record = { ...(stamped as Record<string, unknown>) };
+  delete record.pagination_token;
+  return record;
+}
+
+function stampPageToken(payload: unknown, slug: string) {
+  const prefix = pagePrefix(slug);
+  if (!prefix || !payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const record = { ...(payload as Record<string, unknown>) };
+  const token = record.pagination_token;
+  const text = typeof token === "number" && Number.isFinite(token) ? String(token) : typeof token === "string" ? token.trim() : "";
+  if (text && !/^(st|rt|bx|fast):/.test(text)) record.pagination_token = `${prefix}:${text}`;
+  return record;
+}
+
+function widenInstagramNames(names: string[]) {
+  const set = new Set(names);
+  for (const group of INSTAGRAM_ALIASES) {
+    if (group.some((name) => set.has(name))) group.forEach((name) => set.add(name));
+  }
+  return [...set];
+}
+
+function alignInstagramQuery(query: Record<string, string>) {
+  const next = normalizeInstagramQuery(query);
+  const handle = bareInstagramHandle(next.username_or_id || next.username_or_url || next.username || "").replace(/^@+/, "").trim();
+  if (handle) {
+    if (!next.username_or_id?.trim()) next.username_or_id = handle;
+    if (!next.username_or_url?.trim()) next.username_or_url = handle;
+  }
+  return next;
+}
+
+function aliasInstagramConsumer(consumer: ConsumerContext): ConsumerContext {
+  const query = alignInstagramQuery(consumer.query);
   return { ...consumer, query, path: { ...consumer.path, ...query } };
 }
 
@@ -1142,6 +1248,7 @@ function consumerError(failure?: string) {
   if (failure === "tempo_esgotado") return { status: 504, code: "tempo_esgotado" };
   if (failure === "destino_bloqueado") return { status: 422, code: "destino_bloqueado" };
   if (failure === "cota") return { status: 429, code: "cota" };
+  if (failure === "id_instagram") return { status: 424, code: "id_instagram" };
   if (failure === "http_4xx") return { status: 424, code: "provedor" };
   return { status: 502, code: "indisponivel" };
 }

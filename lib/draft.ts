@@ -130,7 +130,9 @@ export function parameterContract(texts: string[]) {
       if (!name || SECRET_QUERY.test(name)) continue;
       known.add(name);
       const value = (match[2] ?? "").trim();
-      if (inPath || !(match[0].includes("|") && value)) asked.add(name);
+      const pageCursor = name === "pagination_token" || name === "max_id" || name === "next_max_id";
+      const optional = match[0].includes("|") && (Boolean(value) || pageCursor);
+      if (inPath || !optional) asked.add(name);
     }
   }
   for (const text of texts) {

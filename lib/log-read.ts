@@ -23,6 +23,7 @@ const CODE_LABEL: Record<string, string> = {
   redirecionamento: "A API tentou redirecionar.",
   resposta_grande: "A resposta da API passou de 1 MB.",
   regra: "Uma regra de erro disparou.",
+  id_instagram: "O id numérico do Instagram não foi encontrado.",
 };
 
 const TONE = {

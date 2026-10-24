@@ -140,6 +140,42 @@ export function matchErrorRule(rules: ErrorRule[], outcome: { status: number | n
   return null;
 }
 
+export function embeddedFailureRule(body: unknown): ErrorRule | null {
+  const record = asRecord(parseBody(body));
+  if (!record) return null;
+  if (filledText(record.error)) return failureRule("error");
+  if (filledText(record.message) && !hasInstagramContent(record)) return failureRule("message");
+  return null;
+}
+
+function failureRule(field: "error" | "message"): ErrorRule {
+  return { kind: "field", field, message: "erro", action: "fallback", waitSeconds: 1 };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function filledText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function filledList(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function hasInstagramContent(record: Record<string, unknown>) {
+  const data = asRecord(record.data) ?? {};
+  const sources = [record, data];
+  for (const source of sources) {
+    if (filledText(source.username) || filledText(source.pk) || filledText(source.id) || filledText(source.UserID) || filledText(source.UserName)) return true;
+    if (typeof source.pk === "number" || typeof source.id === "number" || typeof source.UserID === "number") return true;
+    if (filledList(source.users) || filledList(source.posts) || filledList(source.items) || filledList(source.tagged_posts)) return true;
+  }
+  return false;
+}
+
 function isKind(value: string): value is ErrorKind {
   return ERROR_KINDS.includes(value as ErrorKind);
 }
