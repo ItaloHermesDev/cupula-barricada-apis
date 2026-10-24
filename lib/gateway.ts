@@ -212,7 +212,7 @@ async function hopFallback(barricade: BarricadeRecord, consumer: ConsumerContext
   const alternative = barricade.fallbackId ? await loadAlternative(barricade.fallbackId) : null;
   const safe = barricade.method === "GET" || barricade.idempotent;
   if (!alternative || !safe) return null;
-  const second = await deliverCall(alternative, consumer, requestId, false);
+  const second = await deliverCall(alternative, aliasInstagramConsumer(consumer), requestId, false);
   if (second.blocked || !second.delivery.ok) return null;
   await bump(barricade.id, dayKey(), "fallback_used");
   return { ...second, usedFallback: true, fallbackReason: reason.slice(0, 255) };
@@ -342,7 +342,7 @@ async function sampleDelivery(barricade: BarricadeRecord, consumer: ConsumerCont
 async function sampleHop(barricade: BarricadeRecord, consumer: ConsumerContext) {
   const alternative = barricade.fallbackId ? await loadAlternative(barricade.fallbackId) : null;
   if (!alternative || !(barricade.method === "GET" || barricade.idempotent)) return null;
-  const second = await sampleDelivery(alternative, consumer, false);
+  const second = await sampleDelivery(alternative, aliasInstagramConsumer(consumer), false);
   if ("error" in second || !second.ok) return null;
   return {
     name: alternative.name,
@@ -827,6 +827,16 @@ async function readIncoming(request: Request, barricade: BarricadeRecord) {
 
 const INSTAGRAM_PROFILE = /(?:https?:\/\/)?(?:www\.)?instagram\.com\/([A-Za-z0-9._]+)/i;
 const RESERVED_HANDLE = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct"]);
+
+function aliasInstagramConsumer(consumer: ConsumerContext): ConsumerContext {
+  const query = { ...consumer.query };
+  const raw = query.username_or_id || query.username_or_url || query.username || "";
+  const handle = bareInstagramHandle(raw).replace(/^@+/, "").trim();
+  if (!handle) return consumer;
+  if (!query.username_or_id?.trim()) query.username_or_id = handle;
+  if (!query.username_or_url?.trim()) query.username_or_url = handle;
+  return { ...consumer, query, path: { ...consumer.path, ...query } };
+}
 
 function bareInstagramHandle(value: string) {
   const match = value.trim().replace(/^@+/, "").match(INSTAGRAM_PROFILE);
