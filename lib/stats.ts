@@ -144,6 +144,8 @@ export type BarricadeSpend = {
   success: number;
   latencyMs: number | null;
   spend: number | null;
+  shownBarricade: number;
+  shownExternal: number;
 };
 
 export type SubscriptionSpend = {
@@ -167,7 +169,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
   const range = resolveRange(input?.from, input?.to, today);
   const barricadeId = input?.barricadeId && input.barricadeId > 0 ? input.barricadeId : 0;
   const span: (string | number)[] = [range.from, range.to, barricadeId, barricadeId];
-  const [daily, items, outcomes, durations, failures, apiTotals, apiDaily, subscriptionRows] = await Promise.all([
+  const [daily, items, outcomes, durations, failures, apiTotals, apiDaily, subscriptionRows, displayRows] = await Promise.all([
     query<(RowDataPacket & { day: string; executed: number; checks: number })[]>(
       `SELECT DATE_FORMAT(u.day_key, '%Y-%m-%d') AS day,
               COALESCE(SUM(u.executed), 0) AS executed,
@@ -283,6 +285,15 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
        INNER JOIN external_apis a ON a.id = s.api_id`,
       [range.from, range.to],
     ),
+    query<(RowDataPacket & { barricade_id: number; origem: string; total: number })[]>(
+      `SELECT e.barricade_id, e.origem, COUNT(*) AS total
+       FROM exibicao_origem e
+       INNER JOIN barricades b ON b.id = e.barricade_id
+       WHERE e.day_key BETWEEN ? AND ?
+         AND (? = 0 OR e.barricade_id = ?)
+       GROUP BY e.barricade_id, e.origem`,
+      span,
+    ),
   ]);
 
   const byDay = new Map(daily.map((row) => [String(row.day).slice(0, 10), row]));
@@ -321,9 +332,19 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
     spendByBarricade.set(row.barricadeId, (spendByBarricade.get(row.barricadeId) ?? 0) + row.spend);
   }
   const subscriptions = groupSubscriptions(priced);
+  const shownByBarricade = new Map<number, { barricade: number; external: number }>();
+  for (const row of displayRows) {
+    const id = Number(row.barricade_id);
+    const current = shownByBarricade.get(id) ?? { barricade: 0, external: 0 };
+    const total = Number(row.total ?? 0);
+    if (row.origem === "externo") current.external += total;
+    else if (row.origem === "barricada") current.barricade += total;
+    shownByBarricade.set(id, current);
+  }
   const barricades: BarricadeSpend[] = items.map((row) => {
     const outcome = byOutcome.get(Number(row.id));
     const id = Number(row.id);
+    const shown = shownByBarricade.get(id);
     return {
       id: Number(row.id),
       name: row.name,
@@ -341,6 +362,8 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
       success: Number(outcome?.success ?? 0),
       latencyMs: outcome?.latency == null ? null : Math.round(Number(outcome.latency)),
       spend: pricedBarricades.has(id) ? spendByBarricade.get(id) ?? 0 : null,
+      shownBarricade: shown?.barricade ?? 0,
+      shownExternal: shown?.external ?? 0,
     };
   });
   const usageByApi = new Map<number, Map<string, number>>();
@@ -413,6 +436,8 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
     periodChecks: series.reduce((total, day) => total + day.checks, 0),
     subscriptions,
     subscriptionSpend: scope.some((item) => item.spend != null) ? scope.reduce((total, item) => total + (item.spend ?? 0), 0) : null,
+    shownBarricade: scope.reduce((total, item) => total + item.shownBarricade, 0),
+    shownExternal: scope.reduce((total, item) => total + item.shownExternal, 0),
   };
 }
 

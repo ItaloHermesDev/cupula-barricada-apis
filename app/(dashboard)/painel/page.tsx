@@ -43,33 +43,21 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
 
   return (
     <div className="flex flex-col gap-5">
-      <form action="/painel" className="grid gap-3 rounded-[14px] border border-line bg-card p-4 md:grid-cols-[minmax(0,1.4fr)_160px_160px_auto] md:items-end">
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted">Barricada</span>
-          <select name="barricada" defaultValue={report.focusedId ?? ""} className={controlClass}>
-            <option value="">Todas as barricadas</option>
-            {report.barricades.map((item) => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted">De</span>
-          <input type="date" name="de" defaultValue={report.from} max={report.today} className={controlClass} />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted">Até</span>
-          <input type="date" name="ate" defaultValue={report.to} max={report.today} className={controlClass} />
-        </label>
-        <button type="submit" className="rounded-[12px] bg-accent px-4 py-2 text-sm font-medium text-accent-foreground">Filtrar</button>
-      </form>
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <PeriodLink href={panelHref(report.focusedId, report.today, report.today)} active={report.from === report.today && report.to === report.today}>Hoje</PeriodLink>
-        <PeriodLink href={panelHref(report.focusedId, week, report.today)} active={report.from === week && report.to === report.today}>7 dias</PeriodLink>
-        <PeriodLink href={panelHref(report.focusedId, fortnight, report.today)} active={report.from === fortnight && report.to === report.today}>14 dias</PeriodLink>
-        <p className="text-muted">{report.focusedName ?? "Todas as barricadas"} · {period}</p>
-      </div>
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-3">
+        <Metric
+          icon="monitor"
+          tone="success"
+          label="Da barricada"
+          value={String(report.shownBarricade)}
+          hint="Vezes em que o dado exibido veio da barricada."
+        />
+        <Metric
+          icon="reports"
+          tone="warning"
+          label="Outro método"
+          value={String(report.shownExternal)}
+          hint="Vezes em que o solicitante precisou usar outro método."
+        />
         <Metric
           icon="activity"
           tone="accent"
@@ -107,6 +95,65 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           hint={report.calls > 0 ? `${report.success} de ${report.calls} chamadas reais · ${report.fallback} fallback` : "Nenhuma chamada real no período"}
         />
       </section>
+      <form action="/painel" className="grid gap-3 rounded-[14px] border border-line bg-card p-4 md:grid-cols-[minmax(0,1.4fr)_160px_160px_auto] md:items-end">
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">Barricada</span>
+          <select name="barricada" defaultValue={report.focusedId ?? ""} className={controlClass}>
+            <option value="">Todas as barricadas</option>
+            {report.barricades.map((item) => (
+              <option key={item.id} value={item.id}>{item.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">De</span>
+          <input type="date" name="de" defaultValue={report.from} max={report.today} className={controlClass} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-muted">Até</span>
+          <input type="date" name="ate" defaultValue={report.to} max={report.today} className={controlClass} />
+        </label>
+        <button type="submit" className="rounded-[12px] bg-accent px-4 py-2 text-sm font-medium text-accent-foreground">Filtrar</button>
+      </form>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <PeriodLink href={panelHref(report.focusedId, report.today, report.today)} active={report.from === report.today && report.to === report.today}>Hoje</PeriodLink>
+        <PeriodLink href={panelHref(report.focusedId, week, report.today)} active={report.from === week && report.to === report.today}>7 dias</PeriodLink>
+        <PeriodLink href={panelHref(report.focusedId, fortnight, report.today)} active={report.from === fortnight && report.to === report.today}>14 dias</PeriodLink>
+        <p className="text-muted">{report.focusedName ?? "Todas as barricadas"} · {period}</p>
+      </div>
+
+      <article className="rounded-[14px] border border-line bg-card p-5">
+        <h2 className="text-sm font-medium">Origem dos dados exibidos</h2>
+        <p className="mt-1 text-xs text-muted">O que o solicitante registrou entre {period}. Barricada é o dado que veio dela. Outro método é o que precisou ser buscado fora.</p>
+        <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+          <SpendLine label="Barricada" value={report.shownBarricade} detail="Os dados mostrados vieram da barricada." />
+          <SpendLine label="Outro método" value={report.shownExternal} detail="O solicitante usou outro método." />
+        </ul>
+        {report.shownBarricade + report.shownExternal === 0 ? (
+          <p className="mt-4 text-sm text-muted">Nenhum relato nesse período.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[420px] text-left text-sm">
+              <thead className="text-xs text-muted">
+                <tr className="border-t border-line">
+                  <th className="py-3 pr-3 font-medium">Barricada</th>
+                  <th className="px-3 py-3 font-medium">Da barricada</th>
+                  <th className="py-3 pl-3 font-medium">Outro método</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.barricades.filter((item) => (report.focusedId == null || item.id === report.focusedId) && item.shownBarricade + item.shownExternal > 0).map((item) => (
+                  <tr key={item.id} className="border-t border-line">
+                    <td className="py-3 pr-3 font-medium text-foreground">{item.name}</td>
+                    <td className="px-3 py-3">{item.shownBarricade}</td>
+                    <td className="py-3 pl-3">{item.shownExternal}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
 
       <section className="grid min-w-0 gap-4">
         <SpendChart items={report.barricades} period={period} focusedId={report.focusedId} />
@@ -184,6 +231,8 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
                   <th className="px-3 py-3 font-medium">Resposta</th>
                   <th className="px-3 py-3 font-medium">Sucesso</th>
                   <th className="px-3 py-3 font-medium">Gasto</th>
+                  <th className="px-3 py-3 font-medium">Da barricada</th>
+                  <th className="px-3 py-3 font-medium">Outro método</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                 </tr>
               </thead>
@@ -444,6 +493,8 @@ function BarricadeRow({
       <td className="px-3 py-3">{item.latencyMs == null ? "—" : `${item.latencyMs} ms`}</td>
       <td className="px-3 py-3">{rate}</td>
       <td className="px-3 py-3">{item.spend == null ? "—" : money(item.spend)}</td>
+      <td className="px-3 py-3">{item.shownBarricade}</td>
+      <td className="px-3 py-3">{item.shownExternal}</td>
       <td className="px-5 py-3">
         <span className="inline-flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${status.dot}`} />

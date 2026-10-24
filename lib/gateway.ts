@@ -642,9 +642,8 @@ async function withInstagramUserId(api: ApiRecord, consumer: ConsumerContext, _s
   const query = { ...consumer.query };
   const current = String(query[slot] || "").trim();
   if (/^\d+$/.test(current)) return consumer;
-  const handle = String(query.username_or_url || query.username_or_id || query.username || current || "")
-    .trim()
-    .replace(/^@+/, "");
+  const named = String(query.username_or_url || query.username_or_id || query.username || "").trim().replace(/^@+/, "");
+  const handle = named || (current.includes("@") ? "" : current.replace(/^@+/, ""));
   const id = /^\d+$/.test(handle) ? handle : await resolveInstagramUserId(handle);
   if (!id) {
     query[slot] = "";
@@ -1107,7 +1106,7 @@ const RESERVED_HANDLE = new Set(["p", "reel", "reels", "stories", "explore", "ac
 
 const INSTAGRAM_ALIASES = [
   ["username_or_url", "username_or_id", "username"],
-  ["pagination_token", "max_id"],
+  ["pagination_token", "max_id", "next_max_id"],
 ];
 
 const PAGE_ORDER = { st: 0, rt: 1, bx: 2, fast: 2 } as const;
@@ -1132,14 +1131,17 @@ function pageDecision(slug: string, consumer: ConsumerContext, isReserve: boolea
   if (!acceptsPageToken(slug)) {
     delete query.pagination_token;
     delete query.max_id;
+    delete query.next_max_id;
     delete path.pagination_token;
     delete path.max_id;
+    delete path.next_max_id;
     return { skip: false, consumer: { ...consumer, query, path: { ...path, ...query } } };
   }
-  const raw = (query.pagination_token || query.max_id || "").trim();
+  const raw = (query.pagination_token || query.max_id || query.next_max_id || "").trim();
   const marked = raw.match(/^(st|rt|bx|fast):(.*)$/);
   delete query.pagination_token;
   delete query.max_id;
+  delete query.next_max_id;
   let token = "";
   let skip = false;
   if (marked) {
@@ -1151,10 +1153,12 @@ function pageDecision(slug: string, consumer: ConsumerContext, isReserve: boolea
   }
   if (token) {
     if (prefix === "st") query.pagination_token = token;
+    else if (prefix === "bx") query.next_max_id = token;
     else query.max_id = token;
   }
   delete path.pagination_token;
   delete path.max_id;
+  delete path.next_max_id;
   return { skip, consumer: { ...consumer, query, path: { ...path, ...query } } };
 }
 
