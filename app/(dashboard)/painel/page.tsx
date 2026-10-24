@@ -4,7 +4,9 @@ import { Suspense } from "react";
 import { ApiCompareCharts } from "@/app/components/catalog/api-compare";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { Icon, type IconName } from "@/app/components/icons";
+import { LogResult } from "@/app/components/catalog/log-result";
 import { dayKey, formatWhen } from "@/lib/catalog";
+import { logDetail } from "@/lib/log-read";
 import { requirePage } from "@/lib/dal";
 import { performanceReport, type BarricadeSpend } from "@/lib/stats";
 
@@ -205,9 +207,12 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         ) : (
           <ul className="mt-3 space-y-3 text-sm">
             {report.failures.map((item) => (
-              <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="text-foreground">{item.barricade_name} · {item.outcome}</span>
-                <span className="text-xs text-muted">{formatWhen(item.created_at)} · {item.failure_reason || "sem detalhe"}</span>
+              <li key={item.id} className="flex flex-col gap-1 border-t border-line pt-3 first:border-t-0 first:pt-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-foreground">{item.barricade_name}</span>
+                  <LogResult outcome={item.outcome} failure={item.failure_reason} />
+                </div>
+                <p className="text-xs leading-5 break-words text-muted">{formatWhen(item.created_at)} · {logDetail(item)}</p>
               </li>
             ))}
           </ul>

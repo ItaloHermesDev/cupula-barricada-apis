@@ -3,11 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { BarricadePageLinks } from "@/app/components/catalog/barricade-links";
+import { LogErrorButton } from "@/app/components/catalog/log-error-button";
+import { LogResult } from "@/app/components/catalog/log-result";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { getApi } from "@/lib/apis";
 import { getBarricade } from "@/lib/barricades";
 import { dayKey, formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
+import { httpLabel, logDetail } from "@/lib/log-read";
 import { listBarricadeSources } from "@/lib/sources";
 import { searchLogs } from "@/lib/stats";
 
@@ -70,7 +73,9 @@ async function BarricadeLogs({
         <div>
           <h2 className="text-sm font-medium text-foreground">{current.name}</h2>
           <p className="mt-1 text-sm text-muted">
-            {selected ? `Chamadas da API ${selected.name}.` : "Chamadas gerais desta barricada."}
+            {selected
+              ? `Cada linha é uma chamada da API ${selected.name}.`
+              : "Funcionou é resposta para quem chamou. Não funcionou é erro da API. Recusada nem chegou a chamar a API."}
           </p>
         </div>
         <BarricadePageLinks id={current.id} />
@@ -86,34 +91,49 @@ async function BarricadeLogs({
         ))}
       </div>
       <div className="overflow-x-auto rounded-[14px] border border-line bg-card">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[860px] text-left text-sm">
           <thead className="text-xs tracking-wide text-muted uppercase">
             <tr>
               <th className="px-4 py-3 font-medium">Quando</th>
               <th className="px-4 py-3 font-medium">API</th>
-              <th className="px-4 py-3 font-medium">Tipo</th>
-              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Resultado</th>
+              <th className="px-4 py-3 font-medium">HTTP</th>
+              {selected ? null : <th className="px-4 py-3 font-medium">Cliente</th>}
+              <th className="px-4 py-3 font-medium">Detalhe</th>
               <th className="px-4 py-3 font-medium">Tempo</th>
-              <th className="px-4 py-3 font-medium">Fallback</th>
             </tr>
           </thead>
           <tbody>
             {logs.rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-muted">
+                <td colSpan={selected ? 6 : 7} className="px-4 py-8 text-muted">
                   {selected ? "Nenhuma chamada desta API." : "Nenhuma chamada registrada."}
                 </td>
               </tr>
-            ) : logs.rows.map((row) => (
-              <tr key={row.id} className="border-t border-line">
-                <td className="px-4 py-3 text-muted">{formatWhen(row.created_at)}</td>
-                <td className="px-4 py-3 text-foreground">{row.api_name}</td>
-                <td className="px-4 py-3 text-foreground">{kindOf(row.outcome)}</td>
-                <td className="max-w-md px-4 py-3 break-words whitespace-normal text-foreground">{statusOfLog(row)}</td>
-                <td className="px-4 py-3 text-muted">{row.duration_ms} ms</td>
-                <td className="px-4 py-3 text-muted">{row.outcome === "verificacao" ? "—" : row.used_fallback ? row.fallback_reason || "sim" : "não"}</td>
-              </tr>
-            ))}
+            ) : logs.rows.map((row) => {
+              const detail = logDetail(row);
+              return (
+                <tr key={row.id} className="border-t border-line align-top">
+                  <td className="px-4 py-3 text-muted">{formatWhen(row.created_at)}</td>
+                  <td className="px-4 py-3 text-foreground">
+                    <div>{row.api_name}</div>
+                    {!selected && row.processed_name !== row.barricade_name ? (
+                      <div className="mt-1 text-xs text-accent">Reserva: {row.processed_name}</div>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3"><LogResult outcome={row.outcome} failure={row.failure_reason} /></td>
+                  <td className="px-4 py-3 text-muted">{httpLabel(row.provider_status)}</td>
+                  {selected ? null : <td className="px-4 py-3 text-muted">{httpLabel(row.consumer_status)}</td>}
+                  <td className="max-w-md px-4 py-3 break-words whitespace-normal text-muted">
+                    <div>{detail || "—"}</div>
+                    {row.outcome === "falha" || row.outcome === "fallback" || row.outcome === "rejeitada" || row.has_error ? (
+                      <LogErrorButton id={row.id} summary={detail} hasJson={Boolean(Number(row.has_error))} />
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-muted">{row.duration_ms} ms</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -142,17 +162,3 @@ function pageHref(id: number, apiId: number | undefined, page: number) {
   return `/barricadas/${id}/logs?${params.toString()}`;
 }
 
-function kindOf(outcome: string) {
-  if (outcome === "verificacao") return "Verificação";
-  if (outcome === "rejeitada") return "Rejeitada";
-  if (outcome === "fallback") return "Fallback";
-  if (outcome === "falha") return "Falha";
-  return "Uso real";
-}
-
-function statusOfLog(row: { outcome: string; provider_status: number | null; consumer_status: number; failure_reason: string | null }) {
-  if (row.outcome === "verificacao" || row.outcome === "sucesso" || row.outcome === "falha") {
-    return `HTTP ${row.provider_status ?? "—"}${row.failure_reason ? ` · ${row.failure_reason}` : ""}`;
-  }
-  return `${row.outcome} · ${row.provider_status ?? "—"}/${row.consumer_status}`;
-}

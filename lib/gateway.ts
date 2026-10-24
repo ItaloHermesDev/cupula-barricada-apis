@@ -9,6 +9,8 @@ import { isSensitiveHeader, maskHeaders, maskText } from "@/lib/secrets";
 import { assertPublicHttpUrl, DestinationError } from "@/lib/ssrf";
 import { flattenJson, leavesFromText, parameterContract, splitApiUrl } from "@/lib/draft";
 import { describeErrorBody, failureText, fieldMessage, matchErrorRule, type ErrorRule } from "@/lib/error-rules";
+import { readableFailure } from "@/lib/log-read";
+import { maskedErrorBody, packErrorLog, type ErrorCallRecord } from "@/lib/error-log";
 import { admit, clientAddress, collectQuery, hasControlCharacter, isHopHeader, readRequestText } from "@/lib/intake";
 import { combinePayloads } from "@/lib/combine";
 import { listBarricadeSources, recordRouteCall } from "@/lib/sources";
@@ -95,6 +97,7 @@ export async function serveBarricade(request: Request, slug: string) {
   const consumerStatus = success
     ? delivery.status && delivery.status >= 200 && delivery.status < 300 ? delivery.status : 200
     : failureStatus(delivered.upstream?.failure);
+  const rawFailure = delivered.failureDetail || (success ? "" : delivered.upstream?.failure || delivered.blocked || "indisponivel");
   await writeLog({
     requestId,
     barricade,
@@ -104,10 +107,11 @@ export async function serveBarricade(request: Request, slug: string) {
     consumerStatus,
     duration,
     outcome: success ? (delivered.usedFallback ? "fallback" : "sucesso") : "falha",
-    attempts: (delivered.usedFallback ? 2 : 1) + delivery.extraCalls + delivery.retries,
+    attempts: (delivered.usedFallback || delivered.triedReserve ? 2 : 1) + delivery.extraCalls + delivery.retries,
     usedFallback: delivered.usedFallback,
     fallbackReason: delivered.fallbackReason,
-    failureReason: success ? null : (delivered.failureDetail || delivered.upstream?.failure || delivered.blocked || "indisponivel").slice(0, 500),
+    failureReason: rawFailure ? rawFailure.slice(0, 500) : null,
+    errorJson: packErrorLog(delivered.errorCalls),
     counted: Boolean(delivered.upstream) || delivery.extraCalls > 0,
     consumerKey: consumerKey(request, barricade.tokenPrefix),
   });
@@ -129,10 +133,13 @@ type Settled = { result: UpstreamResult; action: "keep" | "omit" | "fallback" | 
 type Delivery = {
   blocked: "limite_diario" | "limite_minuto" | null;
   usedFallback: boolean;
+  triedReserve: boolean;
   fallbackReason: string | null;
   processed: BarricadeRecord;
   upstream: UpstreamResult | undefined;
   failureDetail: string | null;
+  failureCore: string;
+  errorCalls: ErrorCallRecord[];
   delivery: { ok: boolean; payload: unknown; status: number | null; extraCalls: number; retries: number };
 };
 
@@ -141,25 +148,67 @@ async function deliverCall(
   consumer: ConsumerContext,
   requestId: string,
   allowFallback: boolean,
+  seen: Set<number> = new Set(),
 ): Promise<Delivery> {
+  if (seen.has(barricade.id)) {
+    return {
+      blocked: null,
+      usedFallback: false,
+      triedReserve: false,
+      fallbackReason: null,
+      processed: barricade,
+      upstream: { ...emptyResult(), failure: "destino_bloqueado" },
+      failureDetail: "reserva: ciclo",
+      failureCore: "ciclo",
+      errorCalls: [],
+      delivery: emptyDelivery(),
+    };
+  }
+  const trail = new Set(seen);
+  trail.add(barricade.id);
   const primary = await executeProtected(barricade, consumer, requestId);
   if (primary.blocked) {
-    return { blocked: primary.blocked, usedFallback: false, fallbackReason: null, processed: barricade, upstream: primary.result, failureDetail: primary.blocked, delivery: emptyDelivery() };
+    return { blocked: primary.blocked, usedFallback: false, triedReserve: false, fallbackReason: null, processed: barricade, upstream: primary.result, failureDetail: primary.blocked, failureCore: primary.blocked, errorCalls: [], delivery: emptyDelivery() };
   }
   const settledPrimary = await settleUpstream(primary.result, barricade.errorRules, () => recallPrimary(barricade, consumer, requestId));
   const primaryReason = settledPrimary.action === "fallback"
     ? "regra"
     : settledPrimary.result.failure ?? "indisponivel";
-  const primaryExplain = explainUpstream(settledPrimary.result, settledPrimary.rule);
+  const primarySecrets = primary.secret ? [primary.secret] : [];
+  const primaryCore = explainUpstream(settledPrimary.result, settledPrimary.rule, primarySecrets);
+  const primaryNote = namedFailure(barricade.apiName, primaryCore);
+  const primaryCause = `${barricade.apiName}, ${httpPhrase(settledPrimary.result)}. ${readableFailure(primaryCore).replace(/ · /g, ". ")}`;
+  const errorCalls: ErrorCallRecord[] = [];
+  const primaryFailed = !settledPrimary.result.ok || settledPrimary.action !== "keep";
+  const primaryError = primaryFailed
+    ? errorCall(barricade.apiName, "principal", settledPrimary.result, leadingCode(settledPrimary.result, settledPrimary.rule), primarySecrets)
+    : null;
+  if (primaryError) errorCalls.push(primaryError);
+  if (settledPrimary.result.ok && settledPrimary.action !== "keep" && primaryError) {
+    await markRejectedApiLogs(requestId, barricade.id, barricade.apiId, primaryCore, packErrorLog([primaryError]));
+  }
   let reserveNote = "";
+  let bothFailedText = "";
+  const renderedPrimary = settledPrimary.action === "keep"
+    ? renderPayload(settledPrimary.result.body, barricade.responseTemplate, consumer)
+    : undefined;
+  const paging = Boolean(String(consumer.query.pagination_token || consumer.query.max_id || "").trim());
+  const emptyInstagram = !paging && instagramPayloadEmpty(barricade.slug, renderedPrimary);
   const primaryWantsFallback = allowFallback && (
+    emptyInstagram ||
     settledPrimary.action === "fallback" ||
     (settledPrimary.action === "legacy" && canFallback(barricade, settledPrimary.result.failure))
   );
   if (primaryWantsFallback) {
-    const hopped = await hopFallback(barricade, consumer, requestId, primaryReason);
-    if (hopped.ok) return hopped.delivery;
-    reserveNote = hopped.detail;
+    const hopReason = emptyInstagram && settledPrimary.action === "keep" ? "vazio" : primaryReason;
+    const hopCause = emptyInstagram && settledPrimary.action === "keep"
+      ? `${barricade.apiName}, a resposta veio sem o perfil ou sem a lista.`
+      : primaryCause;
+    const hopped = await hopFallback(barricade, consumer, requestId, hopReason, hopCause, trail);
+    if (hopped.ok) return { ...hopped.delivery, errorCalls };
+    if (hopped.bothFailed) bothFailedText = hopped.detail;
+    else reserveNote = hopped.detail;
+    errorCalls.push(...hopped.calls.map((call) => ({ ...call, papel: "reserva" as const })));
   }
 
   const linked = await listBarricadeSources(barricade.id);
@@ -176,35 +225,56 @@ async function deliverCall(
       await logApiCall(requestId, barricade, api, again, secret);
       return again;
     });
-    return { settled, template: source.responseTemplate };
+    return { name: api.name, secret, settled, template: source.responseTemplate };
   }));
   if (allowFallback && extras.some((extra) => extra?.settled.action === "fallback")) {
-    const hopped = await hopFallback(barricade, consumer, requestId, "regra");
+    const trigger = extras.find((extra) => extra?.settled.action === "fallback");
+    const cause = trigger
+      ? namedFailure(trigger.name, explainUpstream(trigger.settled.result, trigger.settled.rule, trigger.secret ? [trigger.secret] : []))
+      : primaryNote;
+    const hopped = await hopFallback(barricade, consumer, requestId, "regra", cause, trail);
     if (hopped.ok) return hopped.delivery;
-    if (!reserveNote) reserveNote = hopped.detail;
+    if (hopped.bothFailed && !bothFailedText) bothFailedText = hopped.detail;
+    else if (!reserveNote) reserveNote = hopped.detail;
+    errorCalls.push(...hopped.calls.map((call) => ({ ...call, papel: "reserva" as const })));
   }
 
   const parts: unknown[] = [];
   let retries = settledPrimary.retried ? 1 : 0;
-  if (settledPrimary.action === "keep") parts.push(renderPayload(settledPrimary.result.body, barricade.responseTemplate, consumer));
+  if (settledPrimary.action === "keep") parts.push(renderedPrimary);
   let extraCalls = 0;
   let extraStatus: number | null = null;
+  const skipped: string[] = [];
+  if (settledPrimary.action !== "keep" && primaryNote) skipped.push(primaryNote);
   for (const extra of extras) {
     if (!extra) continue;
     extraCalls += 1;
     if (extra.settled.retried) retries += 1;
-    if (extra.settled.action !== "keep") continue;
+    if (extra.settled.action !== "keep") {
+      const secrets = extra.secret ? [extra.secret] : [];
+      const note = namedFailure(extra.name, explainUpstream(extra.settled.result, extra.settled.rule, secrets));
+      if (note) skipped.push(note);
+      errorCalls.push(errorCall(extra.name, "api", extra.settled.result, leadingCode(extra.settled.result, extra.settled.rule), secrets));
+      continue;
+    }
     if (extraStatus == null) extraStatus = extra.settled.result.status;
     parts.push(renderPayload(extra.settled.result.body, extra.template, consumer));
   }
   const delivered = parts.length > 0;
+  const skippedText = skipped.join(" · ");
+  const failureCore = settledPrimary.action === "keep" ? "" : primaryCore;
   return {
     blocked: null,
     usedFallback: false,
+    triedReserve: Boolean(bothFailedText),
     fallbackReason: null,
     processed: barricade,
     upstream: settledPrimary.result,
-    failureDetail: delivered ? null : joinFailure(primaryExplain, reserveNote),
+    failureCore,
+    errorCalls,
+    failureDetail: delivered
+      ? (skippedText ? `Ficou de fora: ${skippedText}`.slice(0, 500) : null)
+      : (bothFailedText || joinFailure(skippedText || primaryNote, reserveNote)),
     delivery: {
       ok: delivered,
       payload: combinePayloads(parts),
@@ -215,19 +285,48 @@ async function deliverCall(
   };
 }
 
-type HopResult = { ok: true; delivery: Delivery } | { ok: false; detail: string };
+type HopResult = { ok: true; delivery: Delivery } | { ok: false; bothFailed: boolean; detail: string; calls: ErrorCallRecord[] };
 
-async function hopFallback(barricade: BarricadeRecord, consumer: ConsumerContext, requestId: string, reason: string): Promise<HopResult> {
+async function hopFallback(
+  barricade: BarricadeRecord,
+  consumer: ConsumerContext,
+  requestId: string,
+  reason: string,
+  cause: string,
+  seen: Set<number>,
+): Promise<HopResult> {
   const alternative = barricade.fallbackId ? await loadAlternative(barricade.fallbackId) : null;
   const safe = barricade.method === "GET" || barricade.idempotent;
-  if (!alternative) return { ok: false, detail: "reserva: nenhuma barricada reserva" };
-  if (!safe) return { ok: false, detail: "reserva: esta chamada não pode ser repetida" };
-  const second = await deliverCall(alternative, aliasInstagramConsumer(consumer), requestId, false);
+  if (!alternative) return { ok: false, bothFailed: false, detail: "reserva: nenhuma barricada reserva", calls: [] };
+  if (!safe) return { ok: false, bothFailed: false, detail: "reserva: esta chamada não pode ser repetida", calls: [] };
+  const second = await deliverCall(alternative, aliasInstagramConsumer(consumer), requestId, true, seen);
   if (second.blocked || !second.delivery.ok) {
-    return { ok: false, detail: `reserva: ${second.blocked || second.failureDetail || "indisponivel"}` };
+    const http = httpPhrase(second.upstream);
+    const nested = second.failureDetail && /reserva/i.test(second.failureDetail) ? second.failureDetail : "";
+    const why = readableFailure(nested || second.failureCore || second.blocked || "indisponivel").replace(/ · /g, ". ");
+    const headline = nested ? "As reservas falharam." : "As duas falharam.";
+    const detail = `${headline} Principal: ${cause}. Reserva: ${alternative.name}, ${http}. ${why}.`
+      .replace(/\s+/g, " ")
+      .slice(0, 500);
+    const calls = second.errorCalls.length
+      ? second.errorCalls
+      : [errorCall(alternative.name, "reserva", second.upstream, second.blocked || second.failureCore || "indisponivel", [])];
+    return { ok: false, bothFailed: true, detail, calls };
   }
   await bump(barricade.id, dayKey(), "fallback_used");
-  return { ok: true, delivery: { ...second, usedFallback: true, fallbackReason: reason.slice(0, 255), failureDetail: null } };
+  return { ok: true, delivery: { ...second, usedFallback: true, triedReserve: false, fallbackReason: reason.slice(0, 255), failureDetail: cause.slice(0, 500), failureCore: "" } };
+}
+
+function httpPhrase(result: { status: number | null } | undefined) {
+  return result?.status ? `HTTP ${result.status}` : "sem HTTP";
+}
+
+async function markRejectedApiLogs(requestId: string, barricadeId: number, apiId: number, reason: string, errorJson: string | null) {
+  await execute(
+    `UPDATE call_logs SET outcome = 'falha', failure_reason = ?, error_json = ?
+     WHERE request_id = ? AND barricade_id = ? AND api_id = ? AND log_scope = 'api' AND outcome = 'sucesso'`,
+    [reason.slice(0, 500), errorJson, requestId, barricadeId, apiId],
+  );
 }
 
 async function recallPrimary(barricade: BarricadeRecord, consumer: ConsumerContext, requestId: string) {
@@ -306,7 +405,15 @@ async function barricadeContract(barricade: BarricadeRecord) {
 type SampleApi = { name: string; status: string; body: string };
 type SampleReport = { total: string; apis: SampleApi[]; fallback: string | null; ok: boolean };
 
-async function sampleDelivery(barricade: BarricadeRecord, consumer: ConsumerContext, allowFallback: boolean): Promise<SampleReport | { error: string }> {
+async function sampleDelivery(
+  barricade: BarricadeRecord,
+  consumer: ConsumerContext,
+  allowFallback: boolean,
+  seen: Set<number> = new Set(),
+): Promise<SampleReport | { error: string }> {
+  if (seen.has(barricade.id)) return { error: "reserva: ciclo" };
+  const trail = new Set(seen);
+  trail.add(barricade.id);
   const primary = await getApi(barricade.apiId);
   if (!primary) return { error: "API não encontrada." };
   const secret = primary.active ? await getApiSecret(primary.id) : "";
@@ -315,12 +422,18 @@ async function sampleDelivery(barricade: BarricadeRecord, consumer: ConsumerCont
     : { ...emptyResult(), failure: "destino_bloqueado" as const };
   const settledPrimary = await settleUpstream(first, barricade.errorRules, () => callUpstream(primary, consumer, secret));
   const apis = [describeSample(primary.name, settledPrimary, secret)];
+  const paging = Boolean(String(consumer.query.pagination_token || consumer.query.max_id || "").trim());
+  const renderedPrimary = settledPrimary.action === "keep"
+    ? renderPayload(settledPrimary.result.body, barricade.responseTemplate, consumer)
+    : undefined;
+  const emptyInstagram = !paging && instagramPayloadEmpty(barricade.slug, renderedPrimary);
   const wantsFallback = (settled: Settled) => allowFallback && (
+    emptyInstagram ||
     settled.action === "fallback" ||
     (settled.action === "legacy" && canFallback(barricade, settled.result.failure))
   );
   if (wantsFallback(settledPrimary)) {
-    const hopped = await sampleHop(barricade, consumer);
+    const hopped = await sampleHop(barricade, consumer, trail);
     if (hopped) return { ok: true, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
   }
 
@@ -336,7 +449,7 @@ async function sampleDelivery(barricade: BarricadeRecord, consumer: ConsumerCont
     extras.push({ settled, template: source.responseTemplate, secret: extraSecret, index: apis.length - 1 });
   }
   if (allowFallback && extras.some((extra) => extra.settled.action === "fallback")) {
-    const hopped = await sampleHop(barricade, consumer);
+    const hopped = await sampleHop(barricade, consumer, trail);
     if (hopped) return { ok: true, total: hopped.total, apis: [...apis, ...hopped.apis], fallback: hopped.name };
   }
 
@@ -351,10 +464,10 @@ async function sampleDelivery(barricade: BarricadeRecord, consumer: ConsumerCont
   return { ok: parts.length > 0, total, apis, fallback: null };
 }
 
-async function sampleHop(barricade: BarricadeRecord, consumer: ConsumerContext) {
+async function sampleHop(barricade: BarricadeRecord, consumer: ConsumerContext, seen: Set<number>) {
   const alternative = barricade.fallbackId ? await loadAlternative(barricade.fallbackId) : null;
   if (!alternative || !(barricade.method === "GET" || barricade.idempotent)) return null;
-  const second = await sampleDelivery(alternative, aliasInstagramConsumer(consumer), false);
+  const second = await sampleDelivery(alternative, aliasInstagramConsumer(consumer), true, seen);
   if ("error" in second || !second.ok) return null;
   return {
     name: alternative.name,
@@ -396,6 +509,12 @@ function explainUpstream(result: UpstreamResult, rule: ErrorRule | null, secrets
     body: result.body ?? result.text,
     rule,
   }), secrets).slice(0, 500);
+}
+
+function namedFailure(name: string, text: string) {
+  const detail = text.trim();
+  if (!detail) return "";
+  return name ? `${name}: ${detail}` : detail;
 }
 
 function joinFailure(primary: string, reserve: string) {
@@ -477,7 +596,7 @@ export async function previewTemplate(apiId: number, template: string, sampleRaw
 async function executeProtected(barricade: BarricadeRecord, consumer: ConsumerContext, requestId: string) {
   const day = dayKey();
   const dailyOk = await reserve(barricade.id, barricade.dailyLimit, day, "executed");
-  if (!dailyOk) return { blocked: "limite_diario" as const, result: emptyResult() };
+  if (!dailyOk) return { blocked: "limite_diario" as const, result: emptyResult(), secret: "" };
   if (barricade.minuteLimit > 0) {
     const minuteOk = await reserveMinute(barricade.id, barricade.minuteLimit);
     if (!minuteOk) {
@@ -485,31 +604,108 @@ async function executeProtected(barricade: BarricadeRecord, consumer: ConsumerCo
         "UPDATE usage_daily SET executed = GREATEST(executed - 1, 0) WHERE barricade_id = ? AND day_key = ?",
         [barricade.id, day],
       );
-      return { blocked: "limite_minuto" as const, result: emptyResult() };
+      return { blocked: "limite_minuto" as const, result: emptyResult(), secret: "" };
     }
   }
   const api = await getApi(barricade.apiId);
   if (!api || !api.active) {
-    return { blocked: null, result: { ...emptyResult(), failure: "destino_bloqueado" as const } };
+    return { blocked: null, result: { ...emptyResult(), failure: "destino_bloqueado" as const }, secret: "" };
   }
   const secret = await getApiSecret(api.id);
   await recordRouteCall(barricade.id, api.id);
   const result = await callUpstream(api, consumer, secret);
   await logApiCall(requestId, barricade, api, result, secret);
-  return { blocked: null, result };
+  return { blocked: null, result, secret };
+}
+
+const USER_ID_SLOT = /[?&]user_id=\{\{\s*consumer\.query\.([a-z0-9_]+)\s*\|/i;
+
+function instagramPayloadEmpty(slug: string, payload: unknown) {
+  if (payload === undefined) return false;
+  if (!slug.startsWith("instagram-stable/") && !slug.startsWith("realtime-instagram/")) return false;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return true;
+  const json = payload as Record<string, unknown>;
+  if (slug.endsWith("/perfil")) return !(json.pk || json.id || json.username);
+  if (slug.endsWith("/posts")) return !filledList(json.posts) && !filledList(json.items);
+  if (slug.endsWith("/marcacoes")) return !filledList(json.items) && !filledList(json.posts);
+  return !filledList(json.users);
+}
+
+function filledList(value: unknown) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+async function withInstagramUserId(api: ApiRecord, consumer: ConsumerContext, secret: string): Promise<ConsumerContext> {
+  const match = api.endpointPath.match(USER_ID_SLOT);
+  if (!match) return consumer;
+  const slot = match[1];
+  const query = { ...consumer.query };
+  const current = String(query[slot] || "").trim();
+  if (/^\d+$/.test(current)) return consumer;
+  const handle = String(query.username_or_url || query.username_or_id || query.username || query.user_id || current || "")
+    .trim()
+    .replace(/^@+/, "");
+  if (!handle) return consumer;
+  const id = /^\d+$/.test(handle) ? handle : await lookupInstagramUserId(api, handle, secret);
+  if (!id) return consumer;
+  query[slot] = id;
+  query.user_id = id;
+  return { ...consumer, query, path: { ...consumer.path, ...query } };
+}
+
+async function lookupInstagramUserId(api: ApiRecord, handle: string, secret: string): Promise<string> {
+  const username = handle.slice(0, 80);
+  if (!/^[A-Za-z0-9._]+$/.test(username)) return "";
+  const lookupConsumer: ConsumerContext = {
+    query: { username_or_url: username, username },
+    header: {},
+    body: {},
+    path: { username_or_url: username, username },
+  };
+  try {
+    const target = new URL(joinUrl(api.baseUrl, `/user_id_by_username?username=${encodeURIComponent(username)}`));
+    assertPinned(api.baseUrl, target);
+    await assertPublicHttpUrl(target.toString());
+    const headers: Record<string, string> = {};
+    for (const pair of api.headers) {
+      if (isHopHeader(pair.name)) continue;
+      const value = fillString(pair.value, lookupConsumer);
+      if (value && !hasControlCharacter(value)) headers[pair.name] = value;
+    }
+    if (api.authType === "bearer" && secret) headers.Authorization = `Bearer ${secret}`;
+    if (api.authType === "basic" && secret) headers.Authorization = `Basic ${Buffer.from(secret).toString("base64")}`;
+    if (api.authType === "api_key" && secret && !isHopHeader(api.credentialHeader || "X-Api-Key")) {
+      headers[api.credentialHeader || "X-Api-Key"] = secret;
+    }
+    const response = await fetch(target, {
+      method: "GET",
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(Math.min(api.timeoutMs || 8000, 8000)),
+    });
+    if (response.status < 200 || response.status >= 300) return "";
+    const parsed = safeJson(await response.text());
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+    const record = parsed as Record<string, unknown>;
+    const digits = String(record.UserID ?? record.user_id ?? record.id ?? record.pk ?? "").trim();
+    return /^\d+$/.test(digits) ? digits : "";
+  } catch {
+    return "";
+  }
 }
 
 async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: string) {
   const started = Date.now();
-  const requestBody = renderBody(api.bodyTemplate, consumer) ?? "";
+  const prepared = await withInstagramUserId(api, consumer, secret);
+  const requestBody = renderBody(api.bodyTemplate, prepared) ?? "";
   let url = "";
   const requestHeaders: Record<string, string> = {};
   try {
-    const endpointPath = fillUrlPath(api.endpointPath, consumer);
+    const endpointPath = fillUrlPath(api.endpointPath, prepared);
     if (endpointPath == null) throw new DestinationError();
     const target = new URL(joinUrl(api.baseUrl, endpointPath));
     for (const pair of api.query) {
-      const value = fillString(pair.value, consumer);
+      const value = fillString(pair.value, prepared);
       if (value && !hasControlCharacter(value)) target.searchParams.set(pair.name, value);
     }
     url = target.toString();
@@ -517,7 +713,7 @@ async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: s
     await assertPublicHttpUrl(url);
     for (const pair of api.headers) {
       if (isHopHeader(pair.name)) continue;
-      const value = fillString(pair.value, consumer);
+      const value = fillString(pair.value, prepared);
       if (value && !hasControlCharacter(value)) requestHeaders[pair.name] = value;
     }
     if (api.authType === "bearer" && secret) requestHeaders.Authorization = `Bearer ${secret}`;
@@ -676,6 +872,7 @@ async function writeLog(entry: {
   usedFallback: boolean;
   fallbackReason: string | null;
   failureReason: string | null;
+  errorJson?: string | null;
   counted: boolean;
   consumerKey: string;
 }) {
@@ -684,8 +881,8 @@ async function writeLog(entry: {
     `INSERT INTO call_logs (
       request_id, barricade_id, processed_barricade_id, api_id, barricade_name, processed_name, api_name,
       day_key, method, provider_status, consumer_status, duration_ms, outcome, attempts, used_fallback,
-      fallback_reason, failure_reason, counted, consumer_key, log_scope
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'geral')`,
+      fallback_reason, failure_reason, error_json, counted, consumer_key, log_scope
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'geral')`,
     [
       entry.requestId,
       entry.barricade?.id ?? null,
@@ -704,6 +901,7 @@ async function writeLog(entry: {
       entry.usedFallback ? 1 : 0,
       entry.fallbackReason,
       entry.failureReason,
+      entry.errorJson ?? null,
       entry.counted ? 1 : 0,
       entry.consumerKey,
     ],
@@ -721,8 +919,8 @@ async function logApiCall(
     `INSERT INTO call_logs (
       request_id, barricade_id, processed_barricade_id, api_id, barricade_name, processed_name, api_name,
       day_key, method, provider_status, consumer_status, duration_ms, outcome, attempts, used_fallback,
-      fallback_reason, failure_reason, counted, consumer_key, log_scope
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, 0, 'api', 'api')`,
+      fallback_reason, failure_reason, error_json, counted, consumer_key, log_scope
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?, 0, 'api', 'api')`,
     [
       requestId,
       barricade.id,
@@ -738,8 +936,34 @@ async function logApiCall(
       Math.max(0, result.durationMs),
       result.ok ? "sucesso" : "falha",
       result.ok ? null : explainUpstream(result, null, secret ? [secret] : []),
+      result.ok ? null : packErrorLog([errorCall(api.name, "api", result, leadingCode(result, null), secret ? [secret] : [])]),
     ],
   );
+}
+
+function leadingCode(result: UpstreamResult | undefined, rule: { kind: string } | null) {
+  if (rule?.kind === "field") return "regra";
+  if (result?.failure) return result.failure;
+  if (result?.status && result.status >= 500) return "http_5xx";
+  if (result?.status && result.status >= 400) return "http_4xx";
+  return "indisponivel";
+}
+
+function errorCall(
+  nome: string,
+  papel: ErrorCallRecord["papel"],
+  result: UpstreamResult | undefined,
+  codigo: string,
+  secrets: string[],
+): ErrorCallRecord {
+  const source = result?.body != null && result.body !== "" ? result.body : result?.text || null;
+  return {
+    nome,
+    papel,
+    codigo: codigo || "indisponivel",
+    http: result?.status ?? null,
+    corpo: maskedErrorBody(source, secrets),
+  };
 }
 
 function canFallback(barricade: BarricadeRecord, failure?: string) {

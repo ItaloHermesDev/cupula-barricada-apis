@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { LogErrorButton } from "@/app/components/catalog/log-error-button";
+import { LogResult } from "@/app/components/catalog/log-result";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { listApis } from "@/lib/apis";
 import { listBarricades } from "@/lib/barricades";
 import { dayKey, formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
+import { httpLabel, logDetail } from "@/lib/log-read";
 import { searchLogs } from "@/lib/stats";
 
 export const metadata: Metadata = { title: "Histórico" };
@@ -53,11 +56,11 @@ async function History({ searchParams }: { searchParams: Promise<Record<string, 
           {barricades.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
         <select name="status" defaultValue={read("status")} className="rounded-[12px] border border-line bg-background px-3 py-2 text-sm">
-          <option value="">Todos os status</option>
-          <option value="sucesso">Sucesso</option>
-          <option value="falha">Falha</option>
-          <option value="rejeitada">Rejeitada</option>
-          <option value="fallback">Fallback</option>
+          <option value="">Todos os resultados</option>
+          <option value="sucesso">Funcionou</option>
+          <option value="fallback">Funcionou pela reserva</option>
+          <option value="falha">Não funcionou</option>
+          <option value="rejeitada">Recusada</option>
           <option value="verificacao">Verificação</option>
         </select>
         <input type="date" name="de" defaultValue={read("de")} className="rounded-[12px] border border-line bg-background px-3 py-2 text-sm" />
@@ -70,33 +73,57 @@ async function History({ searchParams }: { searchParams: Promise<Record<string, 
           Filtrar
         </button>
       </form>
+      <p className="text-sm text-muted">
+        Funcionou é resposta para quem chamou. Não funcionou é erro da API. Recusada nem chegou a chamar a API.
+      </p>
       <div className="overflow-x-auto rounded-[14px] border border-line bg-card">
-        <table className="w-full min-w-[880px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="text-xs tracking-wide text-muted uppercase">
             <tr>
               <th className="px-4 py-3 font-medium">Quando</th>
-              <th className="px-4 py-3 font-medium">Pedido</th>
               <th className="px-4 py-3 font-medium">Barricada</th>
               <th className="px-4 py-3 font-medium">API</th>
-              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Resultado</th>
+              <th className="px-4 py-3 font-medium">HTTP</th>
+              <th className="px-4 py-3 font-medium">Cliente</th>
+              <th className="px-4 py-3 font-medium">Detalhe</th>
               <th className="px-4 py-3 font-medium">Tempo</th>
-              <th className="px-4 py-3 font-medium">Fallback</th>
             </tr>
           </thead>
           <tbody>
             {result.rows.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-muted">Nenhuma chamada neste filtro.</td></tr>
-            ) : result.rows.map((row) => (
-              <tr key={row.id} className="border-t border-line">
-                <td className="px-4 py-3 text-muted">{formatWhen(row.created_at)}</td>
-                <td className="px-4 py-3 font-mono text-xs text-foreground">{row.request_id}</td>
-                <td className="px-4 py-3 text-muted">{row.processed_name !== row.barricade_name ? `${row.barricade_name} → ${row.processed_name}` : row.barricade_name}</td>
-                <td className="px-4 py-3 text-muted">{row.api_name}</td>
-                <td className="max-w-md px-4 py-3 break-words whitespace-normal text-muted">{row.outcome === "verificacao" ? "verificação" : row.outcome} · {row.provider_status ?? "—"}/{row.consumer_status}{row.failure_reason ? ` · ${row.failure_reason}` : ""}</td>
-                <td className="px-4 py-3 text-muted">{row.duration_ms} ms · {row.attempts} tent.</td>
-                <td className="px-4 py-3 text-muted">{row.outcome === "verificacao" ? "consumo interno" : `${row.used_fallback ? row.fallback_reason || "sim" : "não"} · ${row.counted ? "contabilizada" : "não contabilizada"}`}</td>
-              </tr>
-            ))}
+              <tr><td colSpan={8} className="px-4 py-8 text-muted">Nenhuma chamada neste filtro.</td></tr>
+            ) : result.rows.map((row) => {
+              const detail = logDetail(row);
+              return (
+                <tr key={row.id} className="border-t border-line align-top">
+                  <td className="px-4 py-3 text-muted">
+                    <div>{formatWhen(row.created_at)}</div>
+                    <div className="mt-1 font-mono text-[11px] text-muted/80">{row.request_id}</div>
+                  </td>
+                  <td className="px-4 py-3 text-foreground">
+                    <div>{row.barricade_name}</div>
+                    {row.processed_name !== row.barricade_name ? (
+                      <div className="mt-1 text-xs text-accent">Reserva: {row.processed_name}</div>
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 text-foreground">{row.api_name}</td>
+                  <td className="px-4 py-3"><LogResult outcome={row.outcome} failure={row.failure_reason} /></td>
+                  <td className="px-4 py-3 text-muted">{httpLabel(row.provider_status)}</td>
+                  <td className="px-4 py-3 text-muted">{httpLabel(row.consumer_status)}</td>
+                  <td className="max-w-md px-4 py-3 break-words whitespace-normal text-muted">
+                    <div>{detail || "—"}</div>
+                    {row.outcome === "falha" || row.outcome === "fallback" || row.outcome === "rejeitada" || row.has_error ? (
+                      <LogErrorButton id={row.id} summary={detail} hasJson={Boolean(Number(row.has_error))} />
+                    ) : null}
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap text-muted">
+                    {row.duration_ms} ms
+                    {row.attempts > 1 ? <div className="mt-1 text-xs">{row.attempts} tentativas</div> : null}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -25,7 +25,35 @@ type LogRow = RowDataPacket & {
   failure_reason: string | null;
   counted: number;
   consumer_key: string | null;
+  has_error?: number;
 };
+
+const LOG_FIELDS = [
+  "id",
+  "request_id",
+  "barricade_name",
+  "processed_name",
+  "api_name",
+  "api_id",
+  "barricade_id",
+  "created_at",
+  "method",
+  "provider_status",
+  "consumer_status",
+  "duration_ms",
+  "outcome",
+  "attempts",
+  "used_fallback",
+  "fallback_reason",
+  "failure_reason",
+  "counted",
+  "consumer_key",
+];
+
+function logColumns(alias = "") {
+  const prefix = alias ? `${alias}.` : "";
+  return LOG_FIELDS.map((field) => `${prefix}${field}`).join(", ");
+}
 
 type CountRow = RowDataPacket & { total: number };
 type AvgRow = RowDataPacket & { total: number; success: number; latency: number | null; fallback: number };
@@ -44,7 +72,7 @@ export async function dashboardStats() {
       [day],
     ),
     query<LogRow[]>(
-      "SELECT * FROM call_logs WHERE outcome IN ('falha', 'rejeitada') AND log_scope = 'geral' ORDER BY id DESC LIMIT 8",
+      `SELECT ${logColumns()} FROM call_logs WHERE outcome IN ('falha', 'rejeitada') AND log_scope = 'geral' ORDER BY id DESC LIMIT 8`,
     ),
     query<(RowDataPacket & { name: string; daily_limit: number; used_today: number })[]>(
       `SELECT b.name, b.daily_limit, COALESCE(u.executed, 0) AS used_today
@@ -200,7 +228,7 @@ export async function performanceReport(input?: { barricadeId?: number; from?: s
       span,
     ),
     query<LogRow[]>(
-      `SELECT l.* FROM call_logs l
+      `SELECT ${logColumns("l")} FROM call_logs l
        INNER JOIN barricades b ON b.id = l.barricade_id
        WHERE l.outcome IN ('falha', 'rejeitada')
          AND l.log_scope = 'geral'
@@ -532,7 +560,7 @@ export async function searchLogs(filters: {
   const page = Number.isInteger(filters.page) && filters.page > 0 ? filters.page : 1;
   const offset = (page - 1) * 20;
   const rows = await query<LogRow[]>(
-    `SELECT * FROM call_logs WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT 20 OFFSET ${offset}`,
+    `SELECT ${logColumns()}, (error_json IS NOT NULL) AS has_error FROM call_logs WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT 20 OFFSET ${offset}`,
     params,
   );
   const totalRows = await query<CountRow[]>(
