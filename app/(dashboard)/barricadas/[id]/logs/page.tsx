@@ -109,7 +109,7 @@ async function BarricadeLogs({
                 <td className="px-4 py-3 text-muted">{formatWhen(row.created_at)}</td>
                 <td className="px-4 py-3 text-foreground">{row.api_name}</td>
                 <td className="px-4 py-3 text-foreground">{kindOf(row.outcome)}</td>
-                <td className="px-4 py-3 text-foreground">{statusOfLog(row)}</td>
+                <td className="max-w-md px-4 py-3 break-words whitespace-normal text-foreground">{statusOfLog(row)}</td>
                 <td className="px-4 py-3 text-muted">{row.duration_ms} ms</td>
                 <td className="px-4 py-3 text-muted">{row.outcome === "verificacao" ? "—" : row.used_fallback ? row.fallback_reason || "sim" : "não"}</td>
               </tr>

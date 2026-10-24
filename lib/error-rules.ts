@@ -159,6 +159,26 @@ function fieldHasMessage(body: unknown, path: string, message: string) {
   return false;
 }
 
+const FAILURE_TEXT_MAX = 500;
+
+export function failureText(input: {
+  failure?: string | null;
+  status?: number | null;
+  body?: unknown;
+  rule?: ErrorRule | null;
+}) {
+  const rule = input.rule ?? null;
+  const detail = rule?.kind === "field"
+    ? fieldMessage(input.body, rule.field) || `${rule.field}: ${rule.message}`
+    : describeErrorBody(input.body);
+  const code = input.failure
+    || (rule?.kind === "field" ? "regra" : "")
+    || (input.status != null && input.status >= 400 ? `http_${input.status}` : "");
+  const text = [code, detail].filter(Boolean).join(" · ").replace(/\s+/g, " ").trim();
+  if (!text) return "indisponivel";
+  return text.length > FAILURE_TEXT_MAX ? `${text.slice(0, FAILURE_TEXT_MAX - 1)}…` : text;
+}
+
 function readPath(source: unknown, path: string) {
   let current = source;
   for (const part of path.split(".")) {

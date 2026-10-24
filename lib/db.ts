@@ -172,7 +172,7 @@ const CREATE_LOGS = `
     attempts TINYINT UNSIGNED NOT NULL DEFAULT 1,
     used_fallback TINYINT(1) NOT NULL DEFAULT 0,
     fallback_reason VARCHAR(160) NULL,
-    failure_reason VARCHAR(255) NULL,
+    failure_reason VARCHAR(500) NULL,
     counted TINYINT(1) NOT NULL DEFAULT 0,
     consumer_key VARCHAR(80) NULL,
     log_scope VARCHAR(16) NOT NULL DEFAULT 'geral',
@@ -287,6 +287,7 @@ export function ensureSchema() {
       await db.query(CREATE_MINUTES);
       await db.query(CREATE_LOGS);
       await ensureColumn(db, "call_logs", "log_scope", "VARCHAR(16) NOT NULL DEFAULT 'geral'");
+      await ensureFailureReasonLength(db);
       await db.query(CREATE_FLAGS);
       const [flagRows] = await db.query<RowDataPacket[]>(
         "SELECT flag FROM schema_flags WHERE flag = 'grant_ops_pages_v1' LIMIT 1",
@@ -349,6 +350,17 @@ export function ensureSchema() {
   }
 
   return schemaReady;
+}
+
+async function ensureFailureReasonLength(db: Pool) {
+  const [rows] = await db.query<RowDataPacket[]>(
+    `SELECT CHARACTER_MAXIMUM_LENGTH AS length_limit FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'call_logs' AND COLUMN_NAME = 'failure_reason'`,
+  );
+  const limit = Number(rows[0]?.length_limit ?? 0);
+  if (limit > 0 && limit < 500) {
+    await db.query("ALTER TABLE call_logs MODIFY failure_reason VARCHAR(500) NULL");
+  }
 }
 
 async function ensureSignedDailyLimit(db: Pool) {

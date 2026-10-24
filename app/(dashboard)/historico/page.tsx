@@ -92,7 +92,7 @@ async function History({ searchParams }: { searchParams: Promise<Record<string, 
                 <td className="px-4 py-3 font-mono text-xs text-foreground">{row.request_id}</td>
                 <td className="px-4 py-3 text-muted">{row.processed_name !== row.barricade_name ? `${row.barricade_name} → ${row.processed_name}` : row.barricade_name}</td>
                 <td className="px-4 py-3 text-muted">{row.api_name}</td>
-                <td className="px-4 py-3 text-muted">{row.outcome === "verificacao" ? "verificação" : row.outcome} · {row.provider_status ?? "—"}/{row.consumer_status}{row.failure_reason ? ` · ${row.failure_reason}` : ""}</td>
+                <td className="max-w-md px-4 py-3 break-words whitespace-normal text-muted">{row.outcome === "verificacao" ? "verificação" : row.outcome} · {row.provider_status ?? "—"}/{row.consumer_status}{row.failure_reason ? ` · ${row.failure_reason}` : ""}</td>
                 <td className="px-4 py-3 text-muted">{row.duration_ms} ms · {row.attempts} tent.</td>
                 <td className="px-4 py-3 text-muted">{row.outcome === "verificacao" ? "consumo interno" : `${row.used_fallback ? row.fallback_reason || "sim" : "não"} · ${row.counted ? "contabilizada" : "não contabilizada"}`}</td>
               </tr>
