@@ -752,8 +752,7 @@ async function callUpstream(api: ApiRecord, consumer: ConsumerContext, secret: s
     const bytes = await readLimited(response, 1_000_000);
     const text = new TextDecoder().decode(bytes);
     const responseHeaders = Object.fromEntries(response.headers.entries());
-    const contentType = response.headers.get("content-type") ?? "";
-    const body = contentType.includes("json") ? safeJson(text) : text;
+    const body = safeJson(text);
     const failure = response.status === 429 ? "cota" : response.status >= 500 ? "http_5xx" : response.status >= 400 ? "http_4xx" : undefined;
     return resultShell(url, api.method, requestHeaders, requestBody, started, !failure, response.status, responseHeaders, text, failure, body);
   } catch (error) {

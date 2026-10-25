@@ -52,6 +52,15 @@ export function restoreTemplates(value: string) {
 }
 const QUERY_PLACEHOLDER = /\{\{\s*consumer\.query\.([A-Za-z0-9_-]+)\s*(?:\|\s*([^}]*))?\s*\}\}/g;
 const SECRET_QUERY = /authorization|api[-_]?key|token|secret|password|cookie/i;
+const PAGE_CURSOR = new Set(["pagination_token", "max_id", "next_max_id"]);
+
+function isSecretQueryName(name: string) {
+  return SECRET_QUERY.test(name) && !PAGE_CURSOR.has(name);
+}
+
+function isPageCursor(name: string) {
+  return PAGE_CURSOR.has(name);
+}
 
 export type CallParameter = {
   name: string;
@@ -70,7 +79,7 @@ export function callParameters(input: {
 
   function add(param: CallParameter) {
     const name = param.name.trim();
-    if (!name || SECRET_QUERY.test(name)) return;
+    if (!name || isSecretQueryName(name)) return;
     const current = found.get(name);
     if (!current) {
       found.set(name, { ...param, name });
@@ -87,7 +96,7 @@ export function callParameters(input: {
     for (const match of text.matchAll(QUERY_PLACEHOLDER)) {
       const name = match[1];
       const value = (match[2] ?? "").trim();
-      if (!inPath && match[0].includes("|") && value) {
+      if (!inPath && match[0].includes("|") && (value || isPageCursor(name))) {
         if (!found.has(name)) covered.add(name);
         continue;
       }
@@ -127,11 +136,10 @@ export function parameterContract(texts: string[]) {
     QUERY_PLACEHOLDER.lastIndex = 0;
     for (const match of text.matchAll(QUERY_PLACEHOLDER)) {
       const name = match[1];
-      if (!name || SECRET_QUERY.test(name)) continue;
+      if (!name || isSecretQueryName(name)) continue;
       known.add(name);
       const value = (match[2] ?? "").trim();
-      const pageCursor = name === "pagination_token" || name === "max_id" || name === "next_max_id";
-      const optional = match[0].includes("|") && (Boolean(value) || pageCursor);
+      const optional = match[0].includes("|") && (Boolean(value) || isPageCursor(name));
       if (inPath || !optional) asked.add(name);
     }
   }
@@ -183,7 +191,7 @@ export function queryChoices(rawUrl: string, previous: OpenField[] = []) {
   }
   const openByName = new Map(previous.map((item) => [item.name, item.open]));
   return [...url.searchParams].flatMap(([name, value]): OpenField[] => {
-    if (!name || SECRET_QUERY.test(name)) return [];
+    if (!name || isSecretQueryName(name)) return [];
     return [{ name, value, open: openByName.get(name) ?? false }];
   });
 }
@@ -228,7 +236,7 @@ export function presentApiTarget(baseUrl: string, endpointPath: string) {
   const pathFields = pathFieldsFrom(rawPath);
   const path = rawPath.split("/").map((segment, index) => pathFields.find((item) => item.index === index)?.value ?? segment).join("/");
   const queryFields = endpointQuery(restored).flatMap((pair): OpenField[] => {
-    if (SECRET_QUERY.test(pair.name)) return [];
+    if (isSecretQueryName(pair.name)) return [];
     const saved = pair.value.match(QUERY_FIELD);
     if (saved) return [{ name: pair.name, value: (saved[2] ?? "").trim(), open: true }];
     return [{ name: pair.name, value: pair.value, open: false }];
@@ -250,7 +258,7 @@ export function splitApiUrlWithOpen(raw: string, openNames: string[], pathSlots:
   for (const slot of pathSlots) {
     const name = slot.name.trim();
     if (!name) throw new Error("Dê um nome ao pedaço do caminho que quem chama informa. Exemplo: ip.");
-    if (SECRET_QUERY.test(name)) throw new Error("Esse nome fica só no servidor. Escolha outro, como ip.");
+    if (isSecretQueryName(name)) throw new Error("Esse nome fica só no servidor. Escolha outro, como ip.");
     if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("O nome do parâmetro usa letras, números, _ ou -.");
     if (/[{}|]/.test(slot.value)) throw new Error("O valor padrão do parâmetro não pode conter {, } ou |.");
     const template = `{{consumer.query.${name}|${slot.value}}}`;
@@ -265,7 +273,7 @@ export function splitApiUrlWithOpen(raw: string, openNames: string[], pathSlots:
   const parts: string[] = [];
   for (const [name, current] of url.searchParams) {
     const value = queryValues?.has(name) ? queryValues.get(name) ?? "" : current;
-    if (open.has(name) && !SECRET_QUERY.test(name)) {
+    if (open.has(name) && !isSecretQueryName(name)) {
       if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error("O nome do parâmetro usa letras, números, _ ou -.");
       if (/[{}|]/.test(value)) throw new Error("O valor padrão do parâmetro não pode conter {, } ou |.");
       parts.push(`${encodeURIComponent(name)}={{consumer.query.${name}|${value}}}`);

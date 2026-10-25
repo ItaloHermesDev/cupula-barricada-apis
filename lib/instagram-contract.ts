@@ -193,26 +193,66 @@ function userLists(body: unknown) {
   for (const source of layers(body)) {
     found.push(source.users, source.following, source.followers);
     found.push(edgeNodes(source.edge_followed_by), edgeNodes(source.edge_follow));
+    const user = asRecord(source.user);
+    if (user) {
+      found.push(edgeNodes(user.edge_followed_by), edgeNodes(user.edge_follow));
+    }
   }
   if (Array.isArray(body)) found.push(body);
   return found;
 }
 
+function parsedBody(body: unknown) {
+  if (typeof body !== "string") return body;
+  const trimmed = body.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return body;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return body;
+  }
+}
+
+function bestList(body: unknown, kind: "media" | "user") {
+  const match = kind === "media" ? looksLikeMedia : looksLikeUser;
+  let best: unknown[] | null = null;
+  let bestDepth = 99;
+  const visit = (node: unknown, depth: number) => {
+    if (depth > 6) return;
+    if (Array.isArray(node)) {
+      const records = node.map(asRecord).filter((item): item is Record<string, unknown> => Boolean(item));
+      const better = records.length > 0 && records.some(match) && (best == null || depth < bestDepth || (depth === bestDepth && node.length > best.length));
+      if (better) {
+        best = node;
+        bestDepth = depth;
+      }
+      for (const item of node.slice(0, 2)) visit(item, depth + 1);
+      return;
+    }
+    const record = asRecord(node);
+    if (!record) return;
+    for (const item of Object.values(record)) visit(item, depth + 1);
+  };
+  visit(body, 0);
+  return best;
+}
+
 export function shapeInstagramPayload(slug: string, body: unknown, rendered: unknown) {
   if (!instagramSlug(slug)) return rendered;
+  const source = parsedBody(body);
   const base = asRecord(rendered) ?? {};
   if (slug.endsWith("/posts")) {
-    const posts = firstList([base.posts, base.items, ...namedLists(body, ["posts", "items"])]);
+    const posts = firstList([base.posts, base.items, ...namedLists(source, ["posts", "items"])]) ?? bestList(source, "media");
     if (!posts) return rendered;
     return { ...base, posts, items: posts };
   }
   if (slug.endsWith("/marcacoes")) {
-    const items = firstList([base.items, base.tagged_posts, base.posts, ...namedLists(body, ["items", "tagged_posts", "posts"])]);
+    const items = firstList([base.items, base.tagged_posts, base.posts, ...namedLists(source, ["items", "tagged_posts", "posts"])]) ?? bestList(source, "media");
     if (!items) return rendered;
     return { ...base, items };
   }
   if (slug.endsWith("/seguidores") || slug.endsWith("/seguindo") || slug.endsWith("/similares")) {
-    const users = firstList([base.users, ...userLists(body)]);
+    const users = firstList([base.users, ...userLists(source)]) ?? bestList(source, "user");
     if (!users) return rendered;
     return { ...base, users };
   }
