@@ -224,6 +224,17 @@ const CREATE_DISPLAY_SOURCE = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `;
 
+const CREATE_BOT_RESULTS = `
+  CREATE TABLE IF NOT EXISTS bot_resultados (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    tipo VARCHAR(32) NOT NULL,
+    day_key DATE NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY bot_resultados_day_idx (day_key, tipo)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
 const CREATE_FLAGS = `
   CREATE TABLE IF NOT EXISTS schema_flags (
     flag VARCHAR(64) NOT NULL,
@@ -349,6 +360,7 @@ export function ensureSchema() {
       await db.query(CREATE_TRACK_EVENTS);
       await db.query(CREATE_DISPLAY_SOURCE);
       await ensureColumn(db, "exibicao_origem", "day_key", "DATE NULL");
+      await db.query(CREATE_BOT_RESULTS);
       const [trilhaRows] = await db.query<RowDataPacket[]>(
         "SELECT flag FROM schema_flags WHERE flag = 'grant_trilha_nav_v1' LIMIT 1",
       );

@@ -3,11 +3,11 @@ import { getBarricadeBySlug, verifyBarricadeToken } from "@/lib/barricades";
 import { dayKey } from "@/lib/catalog";
 import { execute } from "@/lib/db";
 
-export type DisplaySource = "barricada" | "externo";
+export type DisplaySource = "barricada" | "externo" | "falha_total";
 
 export function readDisplaySource(value: unknown): DisplaySource | null {
-  const source = String(value ?? "").trim().toLowerCase();
-  if (source === "barricada" || source === "externo") return source;
+  const source = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (source === "barricada" || source === "externo" || source === "falha_total") return source;
   return null;
 }
 

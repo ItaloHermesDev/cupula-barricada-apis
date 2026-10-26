@@ -5,7 +5,7 @@ const MESSAGES = {
   nao_encontrada: "Barricada não encontrada.",
   inativa: "Esta barricada está inativa.",
   nao_autorizado: "Token ausente ou inválido.",
-  origem_invalida: "Informe origem barricada ou externo.",
+  origem_invalida: "Informe origem barricada, externo ou falha_total.",
   payload_invalido: "O corpo precisa ser um JSON.",
 };
 

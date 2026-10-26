@@ -60,6 +60,13 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
         />
         <Metric
           icon="activity"
+          tone="danger"
+          label="Falha total"
+          value={String(report.shownFailure)}
+          hint="Vezes em que nem a barricada nem o outro método entregaram o dado."
+        />
+        <Metric
+          icon="activity"
           tone="accent"
           label={report.singleDay ? "Cota do dia" : "Uso real"}
           value={report.singleDay ? (report.quotaPct == null ? String(report.real) : `${report.quotaPct}%`) : String(report.real)}
@@ -124,35 +131,49 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
 
       <article className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Origem dos dados exibidos</h2>
-        <p className="mt-1 text-xs text-muted">O que o solicitante registrou entre {period}. Barricada é o dado que veio dela. Outro método é o que precisou ser buscado fora.</p>
-        <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+        <p className="mt-1 text-xs text-muted">O que o solicitante registrou entre {period}. Barricada é o dado que veio dela. Outro método é o que precisou ser buscado fora. Falha total é quando nenhum dos dois entregou.</p>
+        <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
           <SpendLine label="Barricada" value={report.shownBarricade} detail="Os dados mostrados vieram da barricada." />
           <SpendLine label="Outro método" value={report.shownExternal} detail="O solicitante usou outro método." />
+          <SpendLine label="Falha total" value={report.shownFailure} detail="Nem a barricada nem o outro método entregaram o dado." />
         </ul>
-        {report.shownBarricade + report.shownExternal === 0 ? (
+        {report.shownBarricade + report.shownExternal + report.shownFailure === 0 ? (
           <p className="mt-4 text-sm text-muted">Nenhum relato nesse período.</p>
         ) : (
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[420px] text-left text-sm">
+            <table className="w-full min-w-[520px] text-left text-sm">
               <thead className="text-xs text-muted">
                 <tr className="border-t border-line">
                   <th className="py-3 pr-3 font-medium">Barricada</th>
                   <th className="px-3 py-3 font-medium">Da barricada</th>
-                  <th className="py-3 pl-3 font-medium">Outro método</th>
+                  <th className="px-3 py-3 font-medium">Outro método</th>
+                  <th className="py-3 pl-3 font-medium">Falha total</th>
                 </tr>
               </thead>
               <tbody>
-                {report.barricades.filter((item) => (report.focusedId == null || item.id === report.focusedId) && item.shownBarricade + item.shownExternal > 0).map((item) => (
+                {report.barricades.filter((item) => (report.focusedId == null || item.id === report.focusedId) && item.shownBarricade + item.shownExternal + item.shownFailure > 0).map((item) => (
                   <tr key={item.id} className="border-t border-line">
                     <td className="py-3 pr-3 font-medium text-foreground">{item.name}</td>
                     <td className="px-3 py-3">{item.shownBarricade}</td>
-                    <td className="py-3 pl-3">{item.shownExternal}</td>
+                    <td className="px-3 py-3">{item.shownExternal}</td>
+                    <td className="py-3 pl-3">{item.shownFailure}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+      </article>
+
+      <article className="rounded-[14px] border border-line bg-card p-5">
+        <h2 className="text-sm font-medium">Bots</h2>
+        <p className="mt-1 text-xs text-muted">Sucesso e falha registrados pelo bot entre {period}.</p>
+        <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <SpendLine label="Sucesso bot · Instagram" value={report.bots.sucessoInstagram} detail="O bot de Instagram concluiu." />
+          <SpendLine label="Falha bot · Instagram" value={report.bots.falhaInstagram} detail="O bot de Instagram não concluiu." />
+          <SpendLine label="Sucesso bot · WhatsApp" value={report.bots.sucessoWhatsapp} detail="O bot de WhatsApp concluiu." />
+          <SpendLine label="Falha bot · WhatsApp" value={report.bots.falhaWhatsapp} detail="O bot de WhatsApp não concluiu." />
+        </ul>
       </article>
 
       <section className="grid min-w-0 gap-4">
@@ -221,7 +242,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           <p className="px-5 pb-5 text-sm text-muted">Cadastre uma barricada para acompanhar desempenho e gasto.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-sm">
+            <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="text-xs text-muted">
                 <tr className="border-t border-line">
                   <th className="px-5 py-3 font-medium">Barricada</th>
@@ -233,6 +254,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
                   <th className="px-3 py-3 font-medium">Gasto</th>
                   <th className="px-3 py-3 font-medium">Da barricada</th>
                   <th className="px-3 py-3 font-medium">Outro método</th>
+                  <th className="px-3 py-3 font-medium">Falha total</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                 </tr>
               </thead>
@@ -495,6 +517,7 @@ function BarricadeRow({
       <td className="px-3 py-3">{item.spend == null ? "—" : money(item.spend)}</td>
       <td className="px-3 py-3">{item.shownBarricade}</td>
       <td className="px-3 py-3">{item.shownExternal}</td>
+      <td className="px-3 py-3">{item.shownFailure}</td>
       <td className="px-5 py-3">
         <span className="inline-flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${status.dot}`} />
