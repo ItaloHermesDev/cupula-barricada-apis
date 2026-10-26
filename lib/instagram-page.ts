@@ -25,6 +25,7 @@ const PREVIEW_AGENTS = [
   "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
   "WhatsApp/2.21.16.20 A",
 ];
+const EMBED_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 export async function lookupInstagramProfile(raw: string): Promise<InstagramLookup> {
   const usuario = readInstagramHandle(raw);
@@ -76,6 +77,8 @@ function normalizeHandle(value: string) {
 
 function profileExists(html: string) {
   if (/property=["']og:description["']/i.test(html) || /"biography"\s*:/.test(html) || /<title[^>]*>[^<]*\(@[A-Za-z0-9._]+\)/i.test(html)) return true;
+  if (readEmbedProfile(html)) return true;
+  if (embedMissing(html)) return false;
   if (/"canonicalRouteName":"comet\.igweb\.PolarisErrorRoute"/.test(html) && /"show_lox_redesigned_404_page":true/.test(html)) return false;
   return null;
 }
@@ -93,8 +96,11 @@ export async function readInstagramPage(raw: string): Promise<InstagramPageCheck
   const fetched = await fetchProfileHtml(page);
   if ("mensagem" in fetched) return { ok: false, mensagem: fetched.mensagem };
 
+  const embed = readEmbedProfile(fetched.html);
+  if (embed) return { ok: true, url: fetched.url, texts: embedTexts(embed), aviso: "" };
+
   const texts = extractTexts(fetched.html).filter((line) => line.toLowerCase() !== "instagram");
-  if (profileUnavailable(fetched.html)) {
+  if (profileUnavailable(fetched.html) || embedMissing(fetched.html)) {
     return {
       ok: true,
       url: fetched.url,
@@ -147,7 +153,80 @@ async function fetchProfileHtml(page: URL): Promise<{ url: string; html: string 
     if (existe === true) return fetched;
     if (existe === false) unavailable = fetched;
   }
+
+  const embed = profileEmbedUrl(page);
+  if (embed) {
+    const fetched = await fetchHtml(embed, EMBED_AGENT);
+    if ("mensagem" in fetched) {
+      failure = failure ?? fetched;
+    } else {
+      const existe = profileExists(fetched.html);
+      if (existe === true) return fetched;
+      if (existe === false) unavailable = fetched;
+    }
+  }
+
   return unavailable ?? failure ?? { mensagem: "Não foi possível ler a página." };
+}
+
+function profileEmbedUrl(page: URL) {
+  const [segment, second] = page.pathname.split("/").filter(Boolean);
+  if (!segment || second === "embed" || !normalizeHandle(segment)) return null;
+  return new URL(`https://www.instagram.com/${segment}/embed/`);
+}
+
+type EmbedProfile = {
+  username: string;
+  full_name?: string;
+  followers_count?: number;
+  posts_count?: number;
+  pronouns?: string[];
+  graphql_media?: { shortcode_media?: { edge_media_to_caption?: { edges?: { node?: { text?: string } }[] } } }[];
+};
+
+function readEmbedProfile(html: string) {
+  if (!/"isProfileEmbed":true/.test(html)) return null;
+  const match = html.match(/"contextJSON":"((?:\\.|[^"\\])*)"/);
+  if (!match) return null;
+  try {
+    const encoded = JSON.parse(`"${match[1]}"`);
+    const parsed = typeof encoded === "string" ? JSON.parse(encoded) as { context?: EmbedProfile } : null;
+    const context = parsed?.context;
+    if (!context || typeof context.username !== "string" || !normalizeHandle(context.username)) return null;
+    return context;
+  } catch {
+    return null;
+  }
+}
+
+function embedMissing(html: string) {
+  return html.includes("XPolarisEmbedProfileController") && /"isProfileEmbed":false/.test(html) && /"contextJSON":null/.test(html);
+}
+
+function embedTexts(context: EmbedProfile) {
+  const texts: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string) => {
+    const line = value.replace(/\s+/g, " ").trim();
+    if (!line || line.length > 500) return;
+    const key = line.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    texts.push(line);
+  };
+
+  if (typeof context.full_name === "string") push(context.full_name);
+  push(`@${context.username}`);
+  if (typeof context.followers_count === "number") push(`${new Intl.NumberFormat("pt-BR").format(context.followers_count)} seguidores`);
+  if (typeof context.posts_count === "number") push(`${new Intl.NumberFormat("pt-BR").format(context.posts_count)} posts`);
+  if (Array.isArray(context.pronouns)) {
+    for (const pronoun of context.pronouns) if (typeof pronoun === "string") push(pronoun);
+  }
+  for (const item of context.graphql_media ?? []) {
+    if (texts.length >= MAX_LINES) break;
+    push(item.shortcode_media?.edge_media_to_caption?.edges?.[0]?.node?.text ?? "");
+  }
+  return texts;
 }
 
 async function fetchHtml(start: URL, userAgent: string): Promise<{ url: string; html: string } | { mensagem: string }> {
