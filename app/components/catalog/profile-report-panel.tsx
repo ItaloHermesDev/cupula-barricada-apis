@@ -31,7 +31,7 @@ export function ProfileReportPanel({ from, to }: { from: string; to: string }) {
     <section className="rounded-[14px] border border-line bg-card p-4">
       <h2 className="text-base font-semibold text-foreground">Relatório de perfil</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
-        Escolha o intervalo. O relatório mostra só os perfis em que a primeira busca, a da foto, falhou. Cada Instagram entra uma vez. As porcentagens separam quem não existe, quem veio com nome inválido e quem falhou porque todas as barricadas erraram.
+        Escolha o intervalo. O relatório mostra só os perfis em que a primeira busca, a da foto, falhou. Cada Instagram entra uma vez. Não existe só entra depois que a verificação da página pública confirma, e esse @ fica gravado. As outras porcentagens separam nome inválido e falha das barricadas.
       </p>
       <form className="mt-4 grid gap-3 md:grid-cols-4" onSubmit={(event) => load(1, event)}>
         <label className="text-sm text-foreground">
@@ -43,7 +43,7 @@ export function ProfileReportPanel({ from, to }: { from: string; to: string }) {
           <input type="date" value={end} onChange={(event) => setEnd(event.target.value)} className="mt-2 w-full rounded-[12px] border border-line bg-background px-3 py-2" />
         </label>
         <button type="submit" disabled={pending} className="self-end rounded-[12px] bg-accent px-4 py-2 text-sm font-medium text-accent-foreground disabled:opacity-60 md:col-span-2 md:w-fit">
-          {pending ? "Gerando..." : "Gerar relatório"}
+          {pending ? "Confirmando..." : "Gerar relatório"}
         </button>
       </form>
       {error ? <p className="mt-4 text-sm text-danger">{error}</p> : null}

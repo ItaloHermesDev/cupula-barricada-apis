@@ -2,6 +2,7 @@ import "server-only";
 import type { RowDataPacket } from "mysql2/promise";
 import { dayKey } from "@/lib/catalog";
 import { query } from "@/lib/db";
+import { lookupInstagramProfile, readInstagramHandle, recordInstagramLookup } from "@/lib/instagram-page";
 
 const PAGE_SIZE = 20;
 
@@ -105,6 +106,68 @@ export function classifyProfileFailure(reason: string | null | undefined): { kin
   return { kind: "falhou", reason: "Todas as barricadas falharam." };
 }
 
+async function confirmMissing(rows: ProfileFailure[]) {
+  const handles = [...new Set(rows.flatMap((row) => {
+    if (row.kind === "invalido") return [];
+    const handle = readInstagramHandle(row.alvo);
+    return handle ? [handle] : [];
+  }))];
+  const known = await latestLookups(handles);
+  const pending = handles.filter((handle) => !known.has(handle));
+  await mapLimit(pending, 4, async (handle) => {
+    const result = await lookupInstagramProfile(handle);
+    if (!result.ok) return;
+    known.set(result.usuario, result.existe);
+    await recordInstagramLookup(result.usuario, result.existe);
+  });
+
+  for (const row of rows) {
+    if (row.kind === "invalido") continue;
+    const handle = readInstagramHandle(row.alvo);
+    const existe = handle ? known.get(handle) : undefined;
+    if (existe === false) {
+      row.kind = "inexistente";
+      row.reason = "O perfil não existe.";
+      continue;
+    }
+    if (row.kind !== "inexistente") continue;
+    row.kind = "falhou";
+    row.reason = existe === true ? "O perfil existe, mas a busca falhou." : "Não foi possível confirmar se o perfil existe.";
+  }
+}
+
+async function latestLookups(handles: string[]) {
+  const known = new Map<string, boolean>();
+  if (handles.length === 0) return known;
+  const marks = handles.map(() => "?").join(", ");
+  const saved = await query<Array<RowDataPacket & { usuario: string; existe: number }>>(
+    `SELECT c.usuario, c.existe
+     FROM instagram_consultas c
+     INNER JOIN (
+       SELECT usuario, MAX(id) AS id
+       FROM instagram_consultas
+       WHERE usuario IN (${marks})
+       GROUP BY usuario
+     ) ultima ON ultima.id = c.id`,
+    handles,
+  );
+  for (const row of saved) known.set(row.usuario, Number(row.existe) === 1);
+  return known;
+}
+
+async function mapLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
+  if (items.length === 0) return;
+  let next = 0;
+  async function run() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      await worker(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => run()));
+}
+
 function percent(part: number, total: number) {
   if (total <= 0) return "0%";
   return `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format((part / total) * 100)}%`;
@@ -144,6 +207,7 @@ export async function profileFailureReport(input: { from?: string; to?: string; 
       createdAt: row.created_at,
     };
   });
+  await confirmMissing(classified);
   const missing = classified.filter((row) => row.kind === "inexistente").length;
   const invalidName = classified.filter((row) => row.kind === "invalido").length;
   const failed = classified.length - missing - invalidName;

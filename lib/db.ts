@@ -235,6 +235,17 @@ const CREATE_BOT_RESULTS = `
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 `;
 
+const CREATE_INSTAGRAM_LOOKUPS = `
+  CREATE TABLE IF NOT EXISTS instagram_consultas (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    usuario VARCHAR(30) NOT NULL,
+    existe TINYINT(1) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY instagram_consultas_usuario_idx (usuario, id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
 const CREATE_FLAGS = `
   CREATE TABLE IF NOT EXISTS schema_flags (
     flag VARCHAR(64) NOT NULL,
@@ -362,6 +373,7 @@ export function ensureSchema() {
       await db.query(CREATE_DISPLAY_SOURCE);
       await ensureColumn(db, "exibicao_origem", "day_key", "DATE NULL");
       await db.query(CREATE_BOT_RESULTS);
+      await db.query(CREATE_INSTAGRAM_LOOKUPS);
       const [trilhaRows] = await db.query<RowDataPacket[]>(
         "SELECT flag FROM schema_flags WHERE flag = 'grant_trilha_nav_v1' LIMIT 1",
       );
