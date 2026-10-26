@@ -100,6 +100,7 @@ export async function serveBarricade(request: Request, slug: string) {
     ? delivery.status && delivery.status >= 200 && delivery.status < 300 ? delivery.status : 200
     : failureStatus(delivered.upstream?.failure);
   const rawFailure = delivered.failureDetail || (success ? "" : delivered.upstream?.failure || delivered.blocked || "indisponivel");
+  const alvo = requestTarget(barricade.slug, queryRecord(request));
   await writeLog({
     requestId,
     barricade,
@@ -116,6 +117,7 @@ export async function serveBarricade(request: Request, slug: string) {
     errorJson: packErrorLog(delivered.errorCalls),
     counted: Boolean(delivered.upstream) || delivery.extraCalls > 0,
     consumerKey: consumerKey(request, barricade.tokenPrefix),
+    alvo,
   });
   await execute("UPDATE barricades SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?", [barricade.id]);
 
@@ -222,12 +224,13 @@ async function deliverCall(
     if (!api?.active) return null;
     const secret = await getApiSecret(api.id);
     await recordRouteCall(barricade.id, api.id);
+    const alvo = requestTarget(barricade.slug, consumer.query);
     const result = await callUpstream(api, consumer, secret);
-    await logApiCall(requestId, barricade, api, result, secret);
+    await logApiCall(requestId, barricade, api, result, secret, alvo);
     const settled = await settleUpstream(result, source.errorRules, async () => {
       await recordRouteCall(barricade.id, api.id);
       const again = await callUpstream(api, consumer, secret);
-      await logApiCall(requestId, barricade, api, again, secret);
+      await logApiCall(requestId, barricade, api, again, secret, alvo);
       return again;
     });
     return { name: api.name, secret, settled, template: source.responseTemplate };
@@ -340,7 +343,7 @@ async function recallPrimary(barricade: BarricadeRecord, consumer: ConsumerConte
   const secret = await getApiSecret(api.id);
   await recordRouteCall(barricade.id, api.id);
   const result = await callUpstream(api, consumer, secret);
-  await logApiCall(requestId, barricade, api, result, secret);
+  await logApiCall(requestId, barricade, api, result, secret, requestTarget(barricade.slug, consumer.query));
   return result;
 }
 
@@ -638,7 +641,7 @@ async function executeProtected(barricade: BarricadeRecord, consumer: ConsumerCo
   const secret = await getApiSecret(api.id);
   await recordRouteCall(barricade.id, api.id);
   const result = await callUpstream(api, consumer, secret);
-  await logApiCall(requestId, barricade, api, result, secret);
+  await logApiCall(requestId, barricade, api, result, secret, requestTarget(barricade.slug, consumer.query));
   return { blocked: null, result, secret };
 }
 
@@ -885,6 +888,7 @@ async function reject(
     failureReason: reason,
     counted: false,
     consumerKey: consumerKey(request, barricade.tokenPrefix),
+    alvo: requestTarget(barricade.slug, queryRecord(request)),
   });
 }
 
@@ -905,14 +909,15 @@ async function writeLog(entry: {
   errorJson?: string | null;
   counted: boolean;
   consumerKey: string;
+  alvo?: string | null;
 }) {
   const apiName = entry.api?.name ?? entry.barricade?.apiName ?? "API";
   await execute(
     `INSERT INTO call_logs (
       request_id, barricade_id, processed_barricade_id, api_id, barricade_name, processed_name, api_name,
       day_key, method, provider_status, consumer_status, duration_ms, outcome, attempts, used_fallback,
-      fallback_reason, failure_reason, error_json, counted, consumer_key, log_scope
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'geral')`,
+      fallback_reason, failure_reason, error_json, counted, consumer_key, alvo, log_scope
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'geral')`,
     [
       entry.requestId,
       entry.barricade?.id ?? null,
@@ -934,6 +939,7 @@ async function writeLog(entry: {
       entry.errorJson ?? null,
       entry.counted ? 1 : 0,
       entry.consumerKey,
+      storedTarget(entry.alvo),
     ],
   );
 }
@@ -944,13 +950,14 @@ async function logApiCall(
   api: ApiRecord,
   result: UpstreamResult,
   secret = "",
+  alvo = "",
 ) {
   await execute(
     `INSERT INTO call_logs (
       request_id, barricade_id, processed_barricade_id, api_id, barricade_name, processed_name, api_name,
       day_key, method, provider_status, consumer_status, duration_ms, outcome, attempts, used_fallback,
-      fallback_reason, failure_reason, error_json, counted, consumer_key, log_scope
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?, 0, 'api', 'api')`,
+      fallback_reason, failure_reason, error_json, counted, consumer_key, alvo, log_scope
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, NULL, ?, ?, 0, 'api', ?, 'api')`,
     [
       requestId,
       barricade.id,
@@ -967,6 +974,7 @@ async function logApiCall(
       result.ok ? "sucesso" : "falha",
       result.ok ? null : explainUpstream(result, null, secret ? [secret] : []),
       result.ok ? null : packErrorLog([errorCall(api.name, "api", result, leadingCode(result, null), secret ? [secret] : [])]),
+      storedTarget(alvo),
     ],
   );
 }
@@ -1217,6 +1225,38 @@ function bareInstagramHandle(value: string) {
   const handle = match?.[1]?.replace(/\/+$/, "") ?? "";
   if (!handle || RESERVED_HANDLE.has(handle.toLowerCase())) return value;
   return handle;
+}
+
+function queryRecord(request: Request) {
+  const query: Record<string, string> = {};
+  new URL(request.url).searchParams.forEach((value, key) => {
+    if (!query[key]) query[key] = value;
+  });
+  return query;
+}
+
+function storedTarget(value: string | null | undefined) {
+  const clean = (value ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 180);
+  return clean || null;
+}
+
+function requestTarget(slug: string, query: Record<string, string>) {
+  const first = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = String(query[key] ?? "").trim();
+      if (value) return value;
+    }
+    return "";
+  };
+  if (slug.startsWith("instagram-") || slug.startsWith("realtime-instagram")) {
+    const raw = first("username_or_url", "username_or_id", "username");
+    if (!raw) return "";
+    const handle = bareInstagramHandle(raw).replace(/^@+/, "").trim();
+    return `@${handle || raw.replace(/^@+/, "")}`;
+  }
+  if (slug.startsWith("barricada-wpp")) return first("phoneNumber", "number", "phone");
+  if (slug.startsWith("ipinfo") || slug.startsWith("ip-")) return first("ip");
+  return "";
 }
 
 function normalizeInstagramQuery(query: Record<string, string>) {

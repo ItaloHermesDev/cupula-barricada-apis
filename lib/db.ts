@@ -312,6 +312,7 @@ export function ensureSchema() {
       await db.query(CREATE_LOGS);
       await ensureColumn(db, "call_logs", "log_scope", "VARCHAR(16) NOT NULL DEFAULT 'geral'");
       await ensureColumn(db, "call_logs", "error_json", "MEDIUMTEXT NULL");
+      await ensureColumn(db, "call_logs", "alvo", "VARCHAR(180) NULL");
       await ensureFailureReasonLength(db);
       await db.query(CREATE_FLAGS);
       const [flagRows] = await db.query<RowDataPacket[]>(

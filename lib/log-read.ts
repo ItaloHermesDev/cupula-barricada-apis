@@ -58,19 +58,28 @@ export function logDetail(row: {
   outcome: string;
   failure_reason: string | null;
   fallback_reason: string | null;
+  alvo?: string | null;
 }) {
   const failure = readableFailure(row.failure_reason);
+  let text = "";
   if (row.outcome === "fallback") {
-    if (failure) return `${failure} A reserva respondeu no lugar.`;
-    const why = readableFailure(row.fallback_reason);
-    if (why) return `A reserva respondeu no lugar. Motivo: ${why}`;
-    return "A reserva respondeu no lugar da API principal.";
-  }
-  if (row.outcome === "sucesso") return failure;
-  if (failure) return failure;
-  if (row.outcome === "falha") return "A API não devolveu o motivo da falha.";
-  if (row.outcome === "rejeitada") return "A barricada recusou a chamada antes de falar com a API.";
-  return "";
+    if (failure) text = `${failure} A reserva respondeu no lugar.`;
+    else {
+      const why = readableFailure(row.fallback_reason);
+      text = why ? `A reserva respondeu no lugar. Motivo: ${why}` : "A reserva respondeu no lugar da API principal.";
+    }
+  } else if (row.outcome === "sucesso") text = failure;
+  else if (failure) text = failure;
+  else if (row.outcome === "falha") text = "A API não devolveu o motivo da falha.";
+  else if (row.outcome === "rejeitada") text = "A barricada recusou a chamada antes de falar com a API.";
+  return joinSubject(row.alvo, text);
+}
+
+function joinSubject(alvo: string | null | undefined, text: string) {
+  const subject = (alvo ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  if (!subject) return text;
+  if (!text || text.startsWith(subject)) return text || subject;
+  return `${subject} · ${text}`;
 }
 
 export function httpLabel(status: number | null | undefined) {

@@ -25,6 +25,7 @@ type LogRow = RowDataPacket & {
   failure_reason: string | null;
   counted: number;
   consumer_key: string | null;
+  alvo: string | null;
   has_error?: number;
 };
 
@@ -48,6 +49,7 @@ const LOG_FIELDS = [
   "failure_reason",
   "counted",
   "consumer_key",
+  "alvo",
 ];
 
 function logColumns(alias = "") {
