@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { LogResult } from "@/app/components/catalog/log-result";
+import { PageCheckPanel } from "@/app/components/catalog/page-check-panel";
 import { ProfileReportPanel } from "@/app/components/catalog/profile-report-panel";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { formatWhen } from "@/lib/catalog";
@@ -71,6 +72,7 @@ async function Consultas({ searchParams }: { searchParams: Promise<Record<string
           Filtrar
         </button>
       </form>
+      {aba === "instagram" ? <PageCheckPanel /> : null}
       {aba === "instagram" ? <ProfileReportPanel from={read("de") || report.from} to={read("ate") || report.to} /> : null}
       <p className="text-sm text-muted">
         Cada coluna é uma barricada, e dentro dela ficam as rotas usadas. Ativadas conta as barricadas que chegaram a ser chamadas. Recusa antes da API não entra.
