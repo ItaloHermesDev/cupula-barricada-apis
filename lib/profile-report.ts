@@ -113,7 +113,7 @@ async function confirmMissing(rows: ProfileFailure[]) {
     return handle ? [handle] : [];
   }))];
   const known = await latestLookups(handles);
-  const pending = handles.filter((handle) => !known.has(handle));
+  const pending = handles.filter((handle) => known.get(handle) !== true);
   await mapLimit(pending, 4, async (handle) => {
     const result = await lookupInstagramProfile(handle);
     if (!result.ok) return;
