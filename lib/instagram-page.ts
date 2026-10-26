@@ -1,5 +1,7 @@
 import "server-only";
 
+import https from "node:https";
+
 import { execute } from "@/lib/db";
 import { assertPublicHttpUrl, DestinationError } from "@/lib/ssrf";
 
@@ -17,6 +19,10 @@ export type InstagramLookup =
 
 const HANDLE = /^[a-z0-9._]{1,30}$/;
 const RESERVED_HANDLE = new Set(["p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv", "about", "legal", "developer"]);
+const PREVIEW_AGENTS = [
+  "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+  "WhatsApp/2.21.16.20 A",
+];
 
 export async function lookupInstagramProfile(raw: string): Promise<InstagramLookup> {
   const usuario = readInstagramHandle(raw);
@@ -27,10 +33,9 @@ export async function lookupInstagramProfile(raw: string): Promise<InstagramLook
     await assertPublicHttpUrl(page.toString());
   } catch (error) {
     if (error instanceof DestinationError) return { ok: false, erro: "perfil_invalido", mensagem: "Informe o @ ou a URL do perfil.", status: 400 };
-    return { ok: false, erro: "indisponivel", mensagem: "Não foi possível confirmar se o perfil existe.", status: 502 };
   }
 
-  const fetched = await fetchHtml(page);
+  const fetched = await fetchProfileHtml(page);
   if ("mensagem" in fetched) return { ok: false, erro: "indisponivel", mensagem: "Não foi possível confirmar se o perfil existe.", status: 502 };
 
   const existe = profileExists(fetched.html);
@@ -68,10 +73,8 @@ function normalizeHandle(value: string) {
 }
 
 function profileExists(html: string) {
-  if (profileUnavailable(html)) return false;
-  const head = html.slice(0, 100_000);
-  if (/property=["']og:description["']/i.test(head)) return true;
-  if (/"biography"\s*:/.test(html.slice(0, 500_000))) return true;
+  if (/property=["']og:description["']/i.test(html) || /"biography"\s*:/.test(html) || /<title[^>]*>[^<]*\(@[A-Za-z0-9._]+\)/i.test(html)) return true;
+  if (/"canonicalRouteName":"comet\.igweb\.PolarisErrorRoute"/.test(html) && /"show_lox_redesigned_404_page":true/.test(html)) return false;
   return null;
 }
 
@@ -83,10 +86,9 @@ export async function readInstagramPage(raw: string): Promise<InstagramPageCheck
     await assertPublicHttpUrl(page.toString());
   } catch (error) {
     if (error instanceof DestinationError) return { ok: false, mensagem: "Esse endereço não pode ser lido daqui." };
-    return { ok: false, mensagem: "Não foi possível ler a página." };
   }
 
-  const fetched = await fetchHtml(page);
+  const fetched = await fetchProfileHtml(page);
   if ("mensagem" in fetched) return { ok: false, mensagem: fetched.mensagem };
 
   const texts = extractTexts(fetched.html).filter((line) => line.toLowerCase() !== "instagram");
@@ -130,44 +132,49 @@ function isInstagramHost(hostname: string) {
   return host === "instagram.com" || host === "www.instagram.com" || host === "m.instagram.com";
 }
 
-async function fetchHtml(start: URL): Promise<{ url: string; html: string } | { mensagem: string }> {
+async function fetchProfileHtml(page: URL): Promise<{ url: string; html: string } | { mensagem: string }> {
+  let unavailable: { url: string; html: string } | null = null;
+  let failure: { mensagem: string } | null = null;
+  for (const agent of PREVIEW_AGENTS) {
+    const fetched = await fetchHtml(page, agent);
+    if ("mensagem" in fetched) {
+      failure = fetched;
+      continue;
+    }
+    const existe = profileExists(fetched.html);
+    if (existe === true) return fetched;
+    if (existe === false) unavailable = fetched;
+  }
+  return unavailable ?? failure ?? { mensagem: "Não foi possível ler a página." };
+}
+
+async function fetchHtml(start: URL, userAgent: string): Promise<{ url: string; html: string } | { mensagem: string }> {
   let current = start;
   for (let hop = 0; hop < MAX_HOPS; hop += 1) {
     if (!isInstagramHost(current.hostname)) return { mensagem: "A página saiu do Instagram no redirecionamento." };
     try {
       await assertPublicHttpUrl(current.toString());
-    } catch {
-      return { mensagem: "A página saiu do Instagram no redirecionamento." };
+    } catch (error) {
+      if (error instanceof DestinationError) return { mensagem: "A página saiu do Instagram no redirecionamento." };
     }
 
-    let response: Response;
+    let response: InstagramResponse;
     try {
-      response = await fetch(current, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(12_000),
-        headers: {
-          accept: "text/html,application/xhtml+xml",
-          "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
-          "user-agent": "facebookexternalhit/1.1",
-        },
-      });
+      response = await requestInstagram(current, userAgent);
     } catch (error) {
-      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
-        return { mensagem: "O Instagram demorou demais para responder." };
-      }
+      if (error instanceof Error && error.name === "TimeoutError") return { mensagem: "O Instagram demorou demais para responder." };
+      if (error instanceof Error && error.message === "grande") return { mensagem: "A página passou do tamanho que dá para ler aqui." };
       return { mensagem: "Não foi possível ler a página." };
     }
 
     if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location) return { mensagem: "O Instagram redirecionou sem informar o destino." };
+      if (!response.location) return { mensagem: "O Instagram redirecionou sem informar o destino." };
       let next: URL;
       try {
-        next = new URL(location, current);
+        next = new URL(response.location, current);
       } catch {
         return { mensagem: "O Instagram redirecionou para um endereço inválido." };
       }
-      await response.body?.cancel().catch(() => undefined);
       if (next.protocol !== "https:" || !isInstagramHost(next.hostname)) {
         return { mensagem: "A página saiu do Instagram no redirecionamento." };
       }
@@ -176,19 +183,12 @@ async function fetchHtml(start: URL): Promise<{ url: string; html: string } | { 
       continue;
     }
 
-    if (!response.ok) return { mensagem: "O Instagram não entregou o HTML dessa página." };
-    const type = response.headers.get("content-type") ?? "";
-    if (type && !/text\/html|text\/plain|application\/xhtml/i.test(type)) {
+    if (response.status < 200 || response.status >= 300) return { mensagem: "O Instagram não entregou o HTML dessa página." };
+    if (response.type && !/text\/html|text\/plain|application\/xhtml/i.test(response.type)) {
       return { mensagem: "A resposta não veio em HTML." };
     }
 
-    try {
-      const bytes = await readLimited(response, MAX_BYTES);
-      return { url: current.toString(), html: new TextDecoder().decode(bytes) };
-    } catch (error) {
-      if (error instanceof Error && error.message === "grande") return { mensagem: "A página passou do tamanho que dá para ler aqui." };
-      return { mensagem: "Não foi possível ler a página." };
-    }
+    return { url: current.toString(), html: new TextDecoder().decode(response.body) };
   }
 
   return { mensagem: "A página saiu do Instagram no redirecionamento." };
@@ -316,26 +316,79 @@ function safeChar(code: number) {
   return String.fromCodePoint(code);
 }
 
-async function readLimited(response: Response, max: number) {
-  const reader = response.body?.getReader();
-  if (!reader) return new Uint8Array();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > max) {
-      await reader.cancel();
-      throw new Error("grande");
-    }
-    chunks.push(value);
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return out;
+type InstagramResponse = { status: number; location: string; type: string; body: Buffer };
+
+function requestInstagram(target: URL, userAgent: string) {
+  return requestFamily(target, userAgent, 4).catch((error: unknown) => {
+    if (!ipv4Unreachable(error)) throw error;
+    return requestFamily(target, userAgent, 6);
+  });
+}
+
+function ipv4Unreachable(error: unknown) {
+  if (!(error instanceof Error) || !("code" in error)) return false;
+  return ["ENETUNREACH", "EHOSTUNREACH", "EAFNOSUPPORT", "EADDRNOTAVAIL", "ENETDOWN"].includes(String(error.code));
+}
+
+function requestFamily(target: URL, userAgent: string, family: 4 | 6) {
+  return new Promise<InstagramResponse>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error, value?: InstagramResponse) => {
+      if (settled) return;
+      settled = true;
+      if (error) reject(error);
+      else if (value) resolve(value);
+    };
+
+    const req = https.request(
+      {
+        hostname: target.hostname,
+        path: `${target.pathname}${target.search}`,
+        method: "GET",
+        family,
+        autoSelectFamily: false,
+        headers: {
+          accept: "text/html,application/xhtml+xml",
+          "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
+          "user-agent": userAgent,
+        },
+      },
+      (res) => {
+        const locationHeader = res.headers.location;
+        const typeHeader = res.headers["content-type"];
+        const location = Array.isArray(locationHeader) ? locationHeader[0] ?? "" : locationHeader ?? "";
+        const type = Array.isArray(typeHeader) ? typeHeader[0] ?? "" : typeHeader ?? "";
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          res.resume();
+          finish(undefined, { status, location, type, body: Buffer.alloc(0) });
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        let total = 0;
+        res.on("data", (chunk: Buffer) => {
+          total += chunk.length;
+          if (total > MAX_BYTES) {
+            res.destroy();
+            finish(new Error("grande"));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on("end", () => {
+          finish(undefined, { status, location, type, body: Buffer.concat(chunks) });
+        });
+        res.on("error", (error) => finish(error));
+      },
+    );
+
+    req.setTimeout(12_000, () => {
+      const error = new Error("timeout");
+      error.name = "TimeoutError";
+      req.destroy(error);
+    });
+    req.on("error", (error) => finish(error));
+    req.end();
+  });
 }
