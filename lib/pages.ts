@@ -21,6 +21,13 @@ export const APP_PAGES = [
     nav: true,
   },
   {
+    key: "consultas",
+    href: "/consultas",
+    label: "Consultas",
+    description: "Instagram, telefone e IP, as barricadas por onde passaram e o status final.",
+    nav: true,
+  },
+  {
     key: "trilha",
     href: "/trilha",
     label: "Trilha",

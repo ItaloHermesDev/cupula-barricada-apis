@@ -371,6 +371,15 @@ export function ensureSchema() {
         );
         await db.query("INSERT INTO schema_flags (flag) VALUES ('grant_trilha_nav_v1')");
       }
+      const [consultaRows] = await db.query<RowDataPacket[]>(
+        "SELECT flag FROM schema_flags WHERE flag = 'grant_consultas_nav_v1' LIMIT 1",
+      );
+      if (!consultaRows[0]) {
+        await db.query(
+          "INSERT IGNORE INTO user_pages (user_id, page_key) SELECT DISTINCT user_id, 'consultas' FROM user_pages WHERE page_key IN ('painel', 'historico')",
+        );
+        await db.query("INSERT INTO schema_flags (flag) VALUES ('grant_consultas_nav_v1')");
+      }
     })().catch((error: unknown) => {
       schemaReady = null;
       console.error("Falha ao preparar o banco", error);
