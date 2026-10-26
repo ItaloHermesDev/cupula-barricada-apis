@@ -44,6 +44,18 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
   return (
     <div className="flex flex-col gap-5">
       <section className="grid gap-3 sm:grid-cols-3">
+        <BotCard
+          title="Instagram"
+          period={period}
+          success={report.bots.sucessoInstagram}
+          failure={report.bots.falhaInstagram}
+        />
+        <BotCard
+          title="WhatsApp"
+          period={period}
+          success={report.bots.sucessoWhatsapp}
+          failure={report.bots.falhaWhatsapp}
+        />
         <Metric
           icon="monitor"
           tone="success"
@@ -52,18 +64,18 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           hint="Vezes em que o dado exibido veio da barricada."
         />
         <Metric
-          icon="reports"
+          icon="direct"
           tone="warning"
-          label="Outro método"
+          label="Chamada direta"
           value={String(report.shownExternal)}
-          hint="Vezes em que o solicitante precisou usar outro método."
+          hint="Vezes em que o dado exibido veio de uma chamada direta."
         />
         <Metric
-          icon="activity"
+          icon="alert"
           tone="danger"
           label="Falha total"
           value={String(report.shownFailure)}
-          hint="Vezes em que nem a barricada nem o outro método entregaram o dado."
+          hint="Vezes em que nem a barricada nem a chamada direta entregaram o dado."
         />
         <Metric
           icon="activity"
@@ -95,7 +107,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
           hint={report.focusedName ? "Gasto desta barricada no período" : "Soma das rotas com valor e tokens no período"}
         />
         <Metric
-          icon="monitor"
+          icon="check"
           tone="success"
           label={report.singleDay ? "Sucesso do dia" : "Sucesso no período"}
           value={report.successRate == null ? "—" : `${report.successRate}%`}
@@ -131,11 +143,11 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
 
       <article className="rounded-[14px] border border-line bg-card p-5">
         <h2 className="text-sm font-medium">Origem dos dados exibidos</h2>
-        <p className="mt-1 text-xs text-muted">O que o solicitante registrou entre {period}. Barricada é o dado que veio dela. Outro método é o que precisou ser buscado fora. Falha total é quando nenhum dos dois entregou.</p>
+        <p className="mt-1 text-xs text-muted">O que o solicitante registrou entre {period}. Barricada é o dado que veio dela. Chamada direta é o que precisou ser buscado fora. Falha total é quando nenhum dos dois entregou.</p>
         <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
           <SpendLine label="Barricada" value={report.shownBarricade} detail="Os dados mostrados vieram da barricada." />
-          <SpendLine label="Outro método" value={report.shownExternal} detail="O solicitante usou outro método." />
-          <SpendLine label="Falha total" value={report.shownFailure} detail="Nem a barricada nem o outro método entregaram o dado." />
+          <SpendLine label="Chamada direta" value={report.shownExternal} detail="O solicitante usou uma chamada direta." />
+          <SpendLine label="Falha total" value={report.shownFailure} detail="Nem a barricada nem a chamada direta entregaram o dado." />
         </ul>
         {report.shownBarricade + report.shownExternal + report.shownFailure === 0 ? (
           <p className="mt-4 text-sm text-muted">Nenhum relato nesse período.</p>
@@ -146,7 +158,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
                 <tr className="border-t border-line">
                   <th className="py-3 pr-3 font-medium">Barricada</th>
                   <th className="px-3 py-3 font-medium">Da barricada</th>
-                  <th className="px-3 py-3 font-medium">Outro método</th>
+                  <th className="px-3 py-3 font-medium">Chamada direta</th>
                   <th className="py-3 pl-3 font-medium">Falha total</th>
                 </tr>
               </thead>
@@ -163,17 +175,6 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
             </table>
           </div>
         )}
-      </article>
-
-      <article className="rounded-[14px] border border-line bg-card p-5">
-        <h2 className="text-sm font-medium">Bots</h2>
-        <p className="mt-1 text-xs text-muted">Sucesso e falha registrados pelo bot entre {period}.</p>
-        <ul className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <SpendLine label="Sucesso bot · Instagram" value={report.bots.sucessoInstagram} detail="O bot de Instagram concluiu." />
-          <SpendLine label="Falha bot · Instagram" value={report.bots.falhaInstagram} detail="O bot de Instagram não concluiu." />
-          <SpendLine label="Sucesso bot · WhatsApp" value={report.bots.sucessoWhatsapp} detail="O bot de WhatsApp concluiu." />
-          <SpendLine label="Falha bot · WhatsApp" value={report.bots.falhaWhatsapp} detail="O bot de WhatsApp não concluiu." />
-        </ul>
       </article>
 
       <section className="grid min-w-0 gap-4">
@@ -253,7 +254,7 @@ async function Painel({ searchParams }: { searchParams: Promise<Record<string, s
                   <th className="px-3 py-3 font-medium">Sucesso</th>
                   <th className="px-3 py-3 font-medium">Gasto</th>
                   <th className="px-3 py-3 font-medium">Da barricada</th>
-                  <th className="px-3 py-3 font-medium">Outro método</th>
+                  <th className="px-3 py-3 font-medium">Chamada direta</th>
                   <th className="px-3 py-3 font-medium">Falha total</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                 </tr>
@@ -317,15 +318,39 @@ function Metric({
   }[tone];
 
   return (
-    <article className="kpi-card rounded-[14px] border border-line bg-card p-4">
+    <article className="kpi-card flex h-full min-h-[180px] flex-col rounded-[14px] border border-line bg-card p-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-muted">{label}</p>
-        <span className={`inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-line bg-field ${toneClass}`}>
+        <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-line bg-field ${toneClass}`}>
           <Icon name={icon} />
         </span>
       </div>
       <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
-      <p className="mt-2 text-xs leading-5 text-muted">{hint}</p>
+      <p className="mt-auto pt-2 text-xs leading-5 text-muted">{hint}</p>
+    </article>
+  );
+}
+
+function BotCard({ title, period, success, failure }: { title: string; period: string; success: number; failure: number }) {
+  return (
+    <article className="kpi-card flex h-full min-h-[180px] flex-col rounded-[14px] border border-line bg-card p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium">BOT - {title}</h2>
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border border-line bg-field text-accent">
+          <Icon name="robot" />
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-muted">Sucessos e falhas entre {period}.</p>
+      <dl className="mt-auto grid grid-cols-2 gap-3 pt-3">
+        <div>
+          <dt className="text-xs text-muted">Sucessos</dt>
+          <dd className="mt-1 text-2xl font-semibold tracking-tight text-success">{success}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted">Falhas</dt>
+          <dd className="mt-1 text-2xl font-semibold tracking-tight text-danger">{failure}</dd>
+        </div>
+      </dl>
     </article>
   );
 }

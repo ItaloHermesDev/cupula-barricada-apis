@@ -13,7 +13,11 @@ export type IconName =
   | "menu"
   | "panel"
   | "logout"
-  | "calendar";
+  | "calendar"
+  | "robot"
+  | "direct"
+  | "alert"
+  | "check";
 
 export function Logo({ className = "h-10 w-10" }: { className?: string }) {
   const hex = "M32 8.5 52 20v24L32 55.5 12 44V20L32 8.5Z";
@@ -125,6 +129,39 @@ function paths(name: IconName): ReactNode {
         <>
           <rect x="4" y="5.5" width="16" height="14" rx="2" />
           <path d="M8 3.8v3.2M16 3.8v3.2M4 10h16" />
+        </>
+      );
+    case "robot":
+      return (
+        <>
+          <path d="M12 3.2v2" />
+          <circle cx="12" cy="2.6" r="1" fill="currentColor" stroke="none" />
+          <rect x="5.2" y="5.4" width="13.6" height="12.2" rx="3" />
+          <circle cx="9.4" cy="10.4" r="1.15" fill="currentColor" stroke="none" />
+          <circle cx="14.6" cy="10.4" r="1.15" fill="currentColor" stroke="none" />
+          <path d="M9.2 14.2h5.6" />
+        </>
+      );
+    case "direct":
+      return (
+        <>
+          <path d="M14 4.8h5.2V10" />
+          <path d="M19.2 4.8 10.2 13.8" />
+          <path d="M11 4.8H6.4A1.6 1.6 0 0 0 4.8 6.4v11.2A1.6 1.6 0 0 0 6.4 19.2h11.2a1.6 1.6 0 0 0 1.6-1.6V13" />
+        </>
+      );
+    case "alert":
+      return (
+        <>
+          <path d="M12 4.2 20.2 19H3.8L12 4.2Z" />
+          <path d="M12 9.4v4.2M12 16.5h.01" />
+        </>
+      );
+    case "check":
+      return (
+        <>
+          <circle cx="12" cy="12" r="8" />
+          <path d="M8.2 12.2 10.8 14.8 15.8 9.4" />
         </>
       );
   }
