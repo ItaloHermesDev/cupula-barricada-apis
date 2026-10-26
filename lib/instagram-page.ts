@@ -1,6 +1,8 @@
 import "server-only";
 
+import { lookup } from "node:dns";
 import https from "node:https";
+import type { LookupFunction } from "node:net";
 
 import { execute } from "@/lib/db";
 import { assertPublicHttpUrl, DestinationError } from "@/lib/ssrf";
@@ -330,6 +332,28 @@ function ipv4Unreachable(error: unknown) {
   return ["ENETUNREACH", "EHOSTUNREACH", "EAFNOSUPPORT", "EADDRNOTAVAIL", "ENETDOWN"].includes(String(error.code));
 }
 
+function lookupFamily(ipFamily: 4 | 6): LookupFunction {
+  return (hostname, options, callback) => {
+    lookup(hostname, { family: ipFamily, all: true }, (error, addresses) => {
+      if (error) {
+        callback(error, "");
+        return;
+      }
+      if (options.all) {
+        callback(null, addresses);
+        return;
+      }
+      const first = addresses[0];
+      if (!first) {
+        const missing = Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: "ENOTFOUND" });
+        callback(missing, "");
+        return;
+      }
+      callback(null, first.address, first.family);
+    });
+  };
+}
+
 function requestFamily(target: URL, userAgent: string, family: 4 | 6) {
   return new Promise<InstagramResponse>((resolve, reject) => {
     let settled = false;
@@ -346,7 +370,7 @@ function requestFamily(target: URL, userAgent: string, family: 4 | 6) {
         path: `${target.pathname}${target.search}`,
         method: "GET",
         family,
-        autoSelectFamily: false,
+        lookup: lookupFamily(family),
         headers: {
           accept: "text/html,application/xhtml+xml",
           "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
