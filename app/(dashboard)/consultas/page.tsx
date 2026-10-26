@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { LogResult } from "@/app/components/catalog/log-result";
+import { ProfileReportPanel } from "@/app/components/catalog/profile-report-panel";
 import { PageFallback } from "@/app/components/dashboard-shell";
 import { formatWhen } from "@/lib/catalog";
 import { requirePage } from "@/lib/dal";
@@ -9,11 +10,13 @@ import { listPassages, type Passage, type PassageColumn } from "@/lib/passages";
 
 export const metadata: Metadata = { title: "Consultas" };
 
-const KINDS = [
-  { key: "ig", title: "Instagram", empty: "Nenhum Instagram neste período.", anchor: "instagram" },
-  { key: "tel", title: "Telefones", empty: "Nenhum telefone neste período.", anchor: "telefones" },
-  { key: "ip", title: "IPs", empty: "Nenhum IP neste período.", anchor: "ips" },
+const TABS = [
+  { id: "instagram", title: "Instagram", empty: "Nenhum Instagram neste período.", table: "ig" },
+  { id: "telefones", title: "Telefones", empty: "Nenhum telefone neste período.", table: "tel" },
+  { id: "ips", title: "IPs", empty: "Nenhum IP neste período.", table: "ip" },
 ] as const;
+
+type TabId = (typeof TABS)[number]["id"];
 
 export default function ConsultasPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   return (
@@ -30,21 +33,36 @@ async function Consultas({ searchParams }: { searchParams: Promise<Record<string
     const value = params[key];
     return Array.isArray(value) ? value[0] ?? "" : value ?? "";
   };
+  const aba: TabId = read("aba") === "telefones" || read("aba") === "ips" ? read("aba") as TabId : "instagram";
+  const tab = TABS.find((item) => item.id === aba) ?? TABS[0];
   const report = await listPassages({ from: read("de"), to: read("ate"), q: read("q") });
-  const tables = {
-    ig: report.instagram,
-    tel: report.telefone,
-    ip: report.ip,
-  };
+  const rows = aba === "instagram" ? report.instagram : aba === "telefones" ? report.telefone : report.ip;
+  const columns = report.columns[aba === "instagram" ? "instagram" : aba === "telefones" ? "telefone" : "ip"];
 
   return (
     <div className="flex flex-col gap-4">
+      <nav className="flex flex-wrap gap-2 text-sm" aria-label="Tabelas">
+        {TABS.map((item) => {
+          const active = item.id === aba;
+          return (
+            <Link
+              key={item.id}
+              href={pageHref(read, { aba: item.id, [item.table]: null })}
+              aria-current={active ? "page" : undefined}
+              className={`rounded-[12px] px-4 py-2 ${active ? "bg-accent text-accent-foreground" : "border border-line bg-card text-foreground"}`}
+            >
+              {item.title}
+            </Link>
+          );
+        })}
+      </nav>
       <form className="grid gap-3 rounded-[14px] border border-line bg-card p-4 md:grid-cols-4">
+        <input type="hidden" name="aba" value={aba} />
         <input
           type="search"
           name="q"
           defaultValue={read("q")}
-          placeholder="Instagram, telefone ou IP"
+          placeholder={aba === "instagram" ? "Instagram" : aba === "telefones" ? "Telefone" : "IP"}
           className="rounded-[12px] border border-line bg-background px-3 py-2 text-sm md:col-span-2"
         />
         <input type="date" name="de" defaultValue={read("de") || report.from} className="rounded-[12px] border border-line bg-background px-3 py-2 text-sm" />
@@ -53,39 +71,24 @@ async function Consultas({ searchParams }: { searchParams: Promise<Record<string
           Filtrar
         </button>
       </form>
+      {aba === "instagram" ? <ProfileReportPanel from={read("de") || report.from} to={read("ate") || report.to} /> : null}
       <p className="text-sm text-muted">
-        Cada coluna é uma barricada, e dentro dela ficam as rotas usadas por aquele Instagram, telefone ou IP. Ativadas conta as barricadas que chegaram a ser chamadas. Recusa antes da API não entra.
+        Cada coluna é uma barricada, e dentro dela ficam as rotas usadas. Ativadas conta as barricadas que chegaram a ser chamadas. Recusa antes da API não entra.
       </p>
-      <nav className="flex flex-wrap gap-2 text-sm">
-        {KINDS.map((kind) => (
-          <a key={kind.anchor} href={`#${kind.anchor}`} className="rounded-[12px] border border-line bg-card px-3 py-2 text-foreground">
-            {kind.title}
-            <span className="ml-2 text-muted">{tables[kind.key].length}</span>
-          </a>
-        ))}
-      </nav>
-      {KINDS.map((kind) => {
-        const page = Math.max(1, Number(read(kind.key)) || 1);
-        return (
-          <PassageTable
-            key={kind.key}
-            id={kind.anchor}
-            title={kind.title}
-            empty={kind.empty}
-            rows={tables[kind.key]}
-            columns={report.columns[kind.key === "ig" ? "instagram" : kind.key === "tel" ? "telefone" : "ip"]}
-            page={page}
-            pageSize={report.pageSize}
-            hrefFor={(next) => pageHref(read, kind.key, next)}
-          />
-        );
-      })}
+      <PassageTable
+        title={tab.title}
+        empty={tab.empty}
+        rows={rows}
+        columns={columns}
+        page={Math.max(1, Number(read(tab.table)) || 1)}
+        pageSize={report.pageSize}
+        hrefFor={(next) => pageHref(read, { [tab.table]: String(next) })}
+      />
     </div>
   );
 }
 
 function PassageTable({
-  id,
   title,
   empty,
   rows,
@@ -94,7 +97,6 @@ function PassageTable({
   pageSize,
   hrefFor,
 }: {
-  id: string;
   title: string;
   empty: string;
   rows: Passage[];
@@ -108,7 +110,7 @@ function PassageTable({
   const visible = rows.slice((current - 1) * pageSize, current * pageSize);
 
   return (
-    <section id={id} className="scroll-mt-24">
+    <section>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-foreground">{title}</h2>
         <p className="text-sm text-muted">{rows.length === 1 ? "1 registro" : `${rows.length} registros`}</p>
@@ -172,12 +174,13 @@ function PassageTable({
   );
 }
 
-function pageHref(read: (key: string) => string, key: string, page: number) {
+function pageHref(read: (key: string) => string, patch: Record<string, string | null>) {
   const params = new URLSearchParams();
-  for (const name of ["q", "de", "ate", "ig", "tel", "ip"]) {
-    const value = name === key ? String(page) : read(name);
-    if (value && value !== "1") params.set(name, value);
+  for (const name of ["aba", "q", "de", "ate", "ig", "tel", "ip"]) {
+    const value = Object.prototype.hasOwnProperty.call(patch, name) ? patch[name] : read(name);
+    if (value && !((name === "ig" || name === "tel" || name === "ip") && value === "1")) params.set(name, value);
   }
   const text = params.toString();
-  return text ? `/consultas?${text}#${key === "ig" ? "instagram" : key === "tel" ? "telefones" : "ips"}` : `/consultas#${key === "ig" ? "instagram" : key === "tel" ? "telefones" : "ips"}`;
+  return text ? `/consultas?${text}` : "/consultas";
 }
+
